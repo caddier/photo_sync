@@ -5,6 +5,11 @@ import 'package:photo_sync/sync_history.dart';
 import 'package:photo_sync/media_eumerator.dart';
 import 'package:photo_sync/media_sync_protocol.dart';
 import 'package:photo_manager/photo_manager.dart';
+//dart:io will be used if/when we add platform-specific foreground service code
+// import 'dart:io' show Platform;
+
+// Optional: foreground service on Android. Native setup required in AndroidManifest.
+// import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 void main() {
   runApp(const MainApp());
@@ -167,9 +172,16 @@ class _SyncPageState extends State<SyncPage> {
         _syncStatus = 'Connecting to server...';
       });
 
-      if (conn == null) {
+        if (conn == null) {
         conn = await doConnectSelectedServer();
         createdConn = true;
+
+        // NOTE: To run reliably in background on Android you should set up
+        // a foreground service (notification) in native code or using a
+        // plugin. This code currently does not start a service automatically
+        // to avoid introducing platform-specific required setup here.
+        // You can enable it by adding a foreground-service plugin and native
+        // manifest changes, or I can implement that for you if you want.
       }
       final assets = await PhotoManager.getAssetListPaged(
         type: type,
@@ -249,6 +261,8 @@ class _SyncPageState extends State<SyncPage> {
           print('Error closing connection: $e');
         }
       }
+
+      // If you implemented a foreground service, stop it here.
       setState(() {
         _isSyncing = false;
         _syncStatus = null;
