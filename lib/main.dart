@@ -42,12 +42,15 @@ class MainTabPage extends StatelessWidget {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Photo Sync'),
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'Sync', icon: Icon(Icons.sync)),
-              Tab(text: 'Server', icon: Icon(Icons.dns)),
-              Tab(text: 'Phone', icon: Icon(Icons.phone_android)),
-            ],
+          bottom: const PreferredSize(
+            preferredSize: Size.fromHeight(36), // Reduce tab bar height
+            child: TabBar(
+              tabs: [
+                Tab(text: 'Sync', icon: Icon(Icons.sync)),
+                Tab(text: 'Server', icon: Icon(Icons.dns)),
+                Tab(text: 'Phone', icon: Icon(Icons.phone_android)),
+              ],
+            ),
           ),
         ),
         body: const TabBarView(
@@ -97,6 +100,13 @@ class _SyncPageState extends State<SyncPage> {
   // Synced counts
   int syncedPhotos = 0;
   int syncedVideos = 0;
+
+    @override
+  void initState() {
+    super.initState();
+    _loadMediaCounts();
+    _loadSyncedCounts();
+  }
 
   Future<void> _loadMediaCounts() async {
     bool permissionGranted = await MediaEnumerator.requestPermission();
@@ -492,61 +502,54 @@ class _SyncPageState extends State<SyncPage> {
         child: Center(
           child: Column(
             children: [
-              const SizedBox(height: 30),
-
-              // -----------------------------
-              // Discover Servers Card
-              // -----------------------------
+              const SizedBox(height: 12),
               Card(
-                margin: const EdgeInsets.symmetric(horizontal: 16),
-                elevation: 4,
+                margin: const EdgeInsets.symmetric(horizontal: 8),
+                elevation: 2,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.all(20),
+                  padding: const EdgeInsets.all(10),
                   child: Column(
                     children: [
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(Icons.wifi_find,
-                            size: 24,
+                            size: 18,
                             color: Theme.of(context).primaryColor,
                           ),
-                          const SizedBox(width: 8),
+                          const SizedBox(width: 4),
                           Text(
                             "Server Discovery",
-                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
                               fontWeight: FontWeight.bold,
                               color: Theme.of(context).primaryColor,
+                              fontSize: 16,
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 8),
                       ElevatedButton(
                         onPressed: discoverServers,
                         style: ElevatedButton.styleFrom(
-                          minimumSize: const Size(200, 45),
+                          minimumSize: const Size(120, 32),
+                          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(8),
                           ),
                         ),
-                        child: const Text("Discover Servers"),
+                        child: const Text("Discover Servers", style: TextStyle(fontSize: 14)),
                       ),
                     ],
                   ),
                 ),
               ),
-
-              const SizedBox(height: 10),
-
-              // -----------------------------
-              // Discovered server list
-              // -----------------------------
+              const SizedBox(height: 6),
               if (discoveredServers.isNotEmpty) ...[
-                const SizedBox(height: 10),
+                const SizedBox(height: 6),
                 Column(
                   children: discoveredServers.map((server) {
                     return Row(
@@ -555,24 +558,24 @@ class _SyncPageState extends State<SyncPage> {
                         Checkbox(
                           value: selectedServer?.deviceName == server.deviceName,
                           onChanged: (_) => selectServer(server),
+                          visualDensity: VisualDensity.compact,
                         ),
-                        Text(server.deviceName),
+                        Text(server.deviceName, style: const TextStyle(fontSize: 13)),
                       ],
                     );
                   }).toList(),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 10),
               ] else
-                const SizedBox(height: 8),
-
+                const SizedBox(height: 4),
               Card(
-                margin: const EdgeInsets.symmetric(horizontal: 16),
-                elevation: 4,
+                margin: const EdgeInsets.symmetric(horizontal: 8),
+                elevation: 2,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.all(20),
+                  padding: const EdgeInsets.all(10),
                   child: Column(
                     children: [
                       Row(
@@ -581,15 +584,16 @@ class _SyncPageState extends State<SyncPage> {
                           Row(
                             children: [
                               Icon(Icons.perm_media, 
-                                size: 24,
+                                size: 18,
                                 color: Theme.of(context).primaryColor,
                               ),
-                              const SizedBox(width: 8),
+                              const SizedBox(width: 4),
                               Text(
                                 "Media on Device",
-                                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
                                   fontWeight: FontWeight.bold,
                                   color: Theme.of(context).primaryColor,
+                                  fontSize: 15,
                                 ),
                               ),
                             ],
@@ -598,21 +602,23 @@ class _SyncPageState extends State<SyncPage> {
                             onPressed: _loadMediaCounts,
                             icon: Icon(
                               Icons.refresh_rounded,
+                              size: 18,
                               color: Theme.of(context).primaryColor,
                             ),
                             tooltip: "Refresh Media Count",
                             style: IconButton.styleFrom(
                               backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
+                              padding: const EdgeInsets.all(4),
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 12),
                       Container(
-                        padding: const EdgeInsets.all(16),
+                        padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(12),
-                          color: Theme.of(context).primaryColor.withOpacity(0.05),
+                          borderRadius: BorderRadius.circular(8),
+                          color: Theme.of(context).primaryColor.withOpacity(0.04),
                         ),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -620,49 +626,51 @@ class _SyncPageState extends State<SyncPage> {
                             Column(
                               children: [
                                 Icon(Icons.photo_library, 
-                                  size: 32,
+                                  size: 22,
                                   color: Theme.of(context).primaryColor,
                                 ),
-                                const SizedBox(height: 12),
+                                const SizedBox(height: 6),
                                 Text(
                                   totalPhotos.toString(),
-                                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
                                     fontWeight: FontWeight.bold,
                                     color: Theme.of(context).primaryColor,
+                                    fontSize: 18,
                                   ),
                                 ),
-                                const SizedBox(height: 4),
+                                const SizedBox(height: 2),
                                 Text(
                                   "Photos",
-                                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                     color: Colors.black54,
                                   ),
                                 ),
                               ],
                             ),
                             Container(
-                              height: 80,
+                              height: 40,
                               width: 1,
                               color: Colors.black12,
                             ),
                             Column(
                               children: [
                                 Icon(Icons.videocam, 
-                                  size: 32,
+                                  size: 22,
                                   color: Theme.of(context).primaryColor,
                                 ),
-                                const SizedBox(height: 12),
+                                const SizedBox(height: 6),
                                 Text(
                                   totalVideos.toString(),
-                                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
                                     fontWeight: FontWeight.bold,
                                     color: Theme.of(context).primaryColor,
+                                    fontSize: 18,
                                   ),
                                 ),
-                                const SizedBox(height: 4),
+                                const SizedBox(height: 2),
                                 Text(
                                   "Videos",
-                                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                     color: Colors.black54,
                                   ),
                                 ),
@@ -675,37 +683,36 @@ class _SyncPageState extends State<SyncPage> {
                   ),
                 ),
               ),
-              
-              const SizedBox(height: 16),
+              const SizedBox(height: 10),
               Card(
-                margin: const EdgeInsets.symmetric(horizontal: 16),
-                elevation: 4,
+                margin: const EdgeInsets.symmetric(horizontal: 8),
+                elevation: 2,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.all(20),
+                  padding: const EdgeInsets.all(10),
                   child: Column(
                     children: [
-                      // Sync All Section
                       Container(
-                        padding: const EdgeInsets.all(16),
+                        padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: Theme.of(context).primaryColor.withOpacity(0.05),
-                          borderRadius: BorderRadius.circular(12),
+                          color: Theme.of(context).primaryColor.withOpacity(0.04),
+                          borderRadius: BorderRadius.circular(8),
                         ),
                         child: Column(
                           children: [
                             Text(
                               "$syncedAll / $totalAll synced",
-                              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
                                 fontWeight: FontWeight.bold,
                                 color: Theme.of(context).primaryColor,
+                                fontSize: 16,
                               ),
                             ),
-                            const SizedBox(height: 8),
+                            const SizedBox(height: 4),
                             if (_syncStatus != null) ...[
-                              const SizedBox(height: 8),
+                              const SizedBox(height: 4),
                               Row(
                                 children: [
                                   Expanded(
@@ -717,7 +724,7 @@ class _SyncPageState extends State<SyncPage> {
                                       ),
                                     ),
                                   ),
-                                  const SizedBox(width: 16),
+                                  const SizedBox(width: 8),
                                   IconButton(
                                     onPressed: () {
                                       setState(() {
@@ -728,106 +735,117 @@ class _SyncPageState extends State<SyncPage> {
                                     icon: const Icon(Icons.stop_circle_outlined),
                                     color: Colors.red,
                                     tooltip: 'Stop sync',
+                                    iconSize: 20,
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 8),
+                              const SizedBox(height: 4),
                               Text(
                                 _syncStatus!,
-                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                   color: Theme.of(context).primaryColor,
                                 ),
                                 textAlign: TextAlign.center,
                               ),
-                              const SizedBox(height: 8),
+                              const SizedBox(height: 4),
                             ],
                             ElevatedButton(
                               onPressed: _isSyncing ? null : syncAll,
                               style: ElevatedButton.styleFrom(
-                                minimumSize: const Size(200, 45),
+                                minimumSize: const Size(120, 32),
+                                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
                                 shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
+                                  borderRadius: BorderRadius.circular(8),
                                 ),
                               ),
-                              child: Text(_isSyncing ? "Syncing..." : "Sync All"),
+                              child: Text(_isSyncing ? "Syncing..." : "Sync All", style: const TextStyle(fontSize: 14)),
                             ),
-                            const SizedBox(height: 8),
+                            const SizedBox(height: 4),
                             OutlinedButton(
                               onPressed: _isSyncing ? null : _clearSyncHistory,
                               style: OutlinedButton.styleFrom(
-                                minimumSize: const Size(200, 40),
+                                minimumSize: const Size(120, 28),
+                                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
                                 side: BorderSide(color: Theme.of(context).primaryColor.withOpacity(0.4)),
                                 shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
+                                  borderRadius: BorderRadius.circular(8),
                                 ),
                               ),
                               child: Text(
                                 'Clear Sync History',
-                                style: TextStyle(color: Theme.of(context).primaryColor),
+                                style: TextStyle(color: Theme.of(context).primaryColor, fontSize: 13),
                               ),
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 24),
-                      
-                      // Individual Sync Options
+                      const SizedBox(height: 10),
                       Row(
                         children: [
-                          // Photos Section
                           Expanded(
                             child: Column(
                               children: [
                                 Text(
                                   "$syncedPhotos / $totalPhotos",
-                                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                     fontWeight: FontWeight.bold,
+                                    fontSize: 14,
                                   ),
                                 ),
-                                const Text("photos"),
-                                const SizedBox(height: 8),
+                                const Text("photos", style: TextStyle(fontSize: 12)),
+                                const SizedBox(height: 4),
                                 ElevatedButton(
                                   onPressed: _isSyncing ? null : syncPhotos,
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
                                     foregroundColor: Theme.of(context).primaryColor,
                                     elevation: 0,
+                                    minimumSize: const Size(80, 28),
+                                    padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
                                   ),
                                   child: Text(
                                     _isSyncing ? "Syncing..." : "Sync Photos",
-                                    style: const TextStyle(fontWeight: FontWeight.bold),
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                                   ),
                                 ),
                               ],
                             ),
                           ),
                           Container(
-                            height: 80,
+                            height: 30,
                             width: 1,
                             color: Colors.black12,
                           ),
-                          // Videos Section
                           Expanded(
                             child: Column(
                               children: [
                                 Text(
                                   "$syncedVideos / $totalVideos",
-                                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                     fontWeight: FontWeight.bold,
+                                    fontSize: 14,
                                   ),
                                 ),
-                                const Text("videos"),
-                                const SizedBox(height: 8),
+                                const Text("videos", style: TextStyle(fontSize: 12)),
+                                const SizedBox(height: 4),
                                 ElevatedButton(
                                   onPressed: _isSyncing ? null : syncVideos,
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
                                     foregroundColor: Theme.of(context).primaryColor,
                                     elevation: 0,
+                                    minimumSize: const Size(80, 28),
+                                    padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
                                   ),
                                   child: Text(
                                     _isSyncing ? "Syncing..." : "Sync Videos",
-                                    style: const TextStyle(fontWeight: FontWeight.bold),
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                                   ),
                                 ),
                               ],
@@ -839,7 +857,7 @@ class _SyncPageState extends State<SyncPage> {
                   ),
                 ),
               ),
-              const SizedBox(height: 40),
+              const SizedBox(height: 16),
             ],
           ),
         ),
