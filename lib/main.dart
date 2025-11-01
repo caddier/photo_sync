@@ -65,14 +65,145 @@ class MainTabPage extends StatelessWidget {
   }
 }
 
-class ServerTab extends StatelessWidget {
+
+class ServerTab extends StatefulWidget {
   const ServerTab({super.key});
+
+  @override
+  State<ServerTab> createState() => _ServerTabState();
+}
+
+class _ServerTabState extends State<ServerTab> {
+  int _currentPage = 0;
+  static const int _itemsPerPage = 9;
+  List<ServerMediaItem> _mediaItems = [];
+  bool _loading = false;
+
+  Future<void> _refreshGallery() async {
+    if (_loading) return;
+    if (mounted) {
+      setState(() { _loading = true; });
+    }
+    // TODO: Replace with actual server API call
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    if (!mounted) return;
+
+    // Example mock data (no external URLs). Replace with real server-provided thumbnails when available.
+    setState(() {
+      _mediaItems = List.generate(30, (i) => ServerMediaItem(
+        url: null,
+        isVideo: i % 4 == 0,
+      ));
+      _loading = false;
+      _currentPage = 0;
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshGallery();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Text('Server tab (add server management UI here)', style: Theme.of(context).textTheme.titleLarge),
+    final pageCount = (_mediaItems.length / _itemsPerPage).ceil();
+    final startIdx = _currentPage * _itemsPerPage;
+    final endIdx = (startIdx + _itemsPerPage).clamp(0, _mediaItems.length);
+    final pageItems = _mediaItems.sublist(startIdx, endIdx);
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ElevatedButton.icon(
+                onPressed: _loading ? null : _refreshGallery,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Refresh', style: TextStyle(fontSize: 14)),
+                style: ElevatedButton.styleFrom(
+                  minimumSize: const Size(100, 32),
+                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : GridView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                    childAspectRatio: 1,
+                  ),
+                  itemCount: pageItems.length,
+                  itemBuilder: (context, idx) {
+                    final item = pageItems[idx];
+                    return Stack(
+                      children: [
+                        Positioned.fill(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: item.url != null && item.url!.isNotEmpty
+                                ? Image.network(
+                                    item.url!,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (c, e, s) => Container(
+                                      color: Colors.grey[300],
+                                      child: const Center(child: Icon(Icons.broken_image)),
+                                    ),
+                                  )
+                                : Container(
+                                    color: Colors.grey[300],
+                                    child: const Center(child: Icon(Icons.image, color: Colors.black45)),
+                                  ),
+                          ),
+                        ),
+                        if (item.isVideo)
+                          const Positioned(
+                            right: 4,
+                            bottom: 4,
+                            child: Icon(Icons.videocam, color: Colors.white, size: 20),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+        ),
+        if (pageCount > 1)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.chevron_left),
+                  onPressed: _currentPage > 0 ? () => setState(() => _currentPage--) : null,
+                ),
+                Text('Page ${_currentPage + 1} / $pageCount', style: const TextStyle(fontSize: 13)),
+                IconButton(
+                  icon: const Icon(Icons.chevron_right),
+                  onPressed: _currentPage < pageCount - 1 ? () => setState(() => _currentPage++) : null,
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
+}
+
+class ServerMediaItem {
+  final String? url;
+  final bool isVideo;
+  ServerMediaItem({this.url, required this.isVideo});
 }
 
 class PhoneTab extends StatelessWidget {
@@ -108,31 +239,39 @@ class _SyncPageState extends State<SyncPage> {
     _loadSyncedCounts();
   }
 
+  bool _loadingMediaCounts = false;
   Future<void> _loadMediaCounts() async {
-    bool permissionGranted = await MediaEnumerator.requestPermission();
-    if (!permissionGranted) {
-      // Handle permission denied
-      return;
+    if (_loadingMediaCounts) return;
+    _loadingMediaCounts = true;
+    try {
+      bool permissionGranted = await MediaEnumerator.requestPermission();
+      if (!permissionGranted) {
+        // Handle permission denied
+        return;
+      }
+
+      // Get photos
+      final photos = await PhotoManager.getAssetListPaged(
+        type: RequestType.image,
+        page: 0,
+        pageCount: 1000000, // Large number to get all
+      );
+
+      // Get videos
+      final videos = await PhotoManager.getAssetListPaged(
+        type: RequestType.video,
+        page: 0,
+        pageCount: 1000000, // Large number to get all
+      );
+
+      if (!mounted) return;
+      setState(() {
+        totalPhotos = photos.length;
+        totalVideos = videos.length;
+      });
+    } finally {
+      _loadingMediaCounts = false;
     }
-
-    // Get photos
-    final photos = await PhotoManager.getAssetListPaged(
-      type: RequestType.image,
-      page: 0,
-      pageCount: 1000000, // Large number to get all
-    );
-
-    // Get videos
-    final videos = await PhotoManager.getAssetListPaged(
-      type: RequestType.video,
-      page: 0,
-      pageCount: 1000000, // Large number to get all
-    );
-
-    setState(() {
-      totalPhotos = photos.length;
-      totalVideos = videos.length;
-    });
   }
 
   Future<void> _loadSyncedCounts() async {
@@ -148,6 +287,7 @@ class _SyncPageState extends State<SyncPage> {
         videos++;
       }
     }
+    if (!mounted) return;
     setState(() {
       syncedPhotos = photos;
       syncedVideos = videos;
@@ -206,11 +346,14 @@ class _SyncPageState extends State<SyncPage> {
 
   Future<ServerConnection> doConnectSelectedServer() async {
     
-    if (selectedServer == null) return Future.error('No server selected');
+  if (selectedServer == null) return Future.error('No server selected');
 
-    ServerConnection conn = ServerConnection(selectedServer!.ipAddress ?? '', 9922);
-    await conn.connect();
-    return conn;  
+  ServerConnection conn = ServerConnection(selectedServer!.ipAddress ?? '', 9922);
+  await conn.connect();
+  // Await the async device name getter
+  String phoneName = await DeviceManager.getLocalDeviceName();
+  await MediaSyncProtocol.sendSyncStart(conn, phoneName);
+  return conn;
   }
 
 
@@ -599,7 +742,7 @@ class _SyncPageState extends State<SyncPage> {
                             ],
                           ),
                           IconButton(
-                            onPressed: _loadMediaCounts,
+                            onPressed: _loadingMediaCounts ? null : _loadMediaCounts,
                             icon: Icon(
                               Icons.refresh_rounded,
                               size: 18,

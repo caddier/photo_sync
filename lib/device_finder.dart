@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:async';
 import 'package:network_info_plus/network_info_plus.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 
 //server suppose to listen on TCP Port 9922 for incoming connections
 //server also need to listen on udp port 7799 for discovery requests
@@ -109,7 +110,7 @@ static String calculateBroadcastAddress(String ip, String mask) {
         final msg = String.fromCharCodes(dg.data);
         final from = dg.address.address;
         print('Received: $msg from $from:${dg.port}');
-        responses.add('$msg');
+        responses.add(msg);
       }
     }
   });
@@ -197,6 +198,19 @@ static String calculateBroadcastAddress(String ip, String mask) {
     );
 
     return controller.stream;
+  }
+
+  static Future<String> getLocalDeviceName() async {
+    final deviceInfo = DeviceInfoPlugin();
+    if (Platform.isAndroid) {
+      final androidInfo = await deviceInfo.androidInfo;
+      return androidInfo.model ?? 'Android';
+    } else if (Platform.isIOS) {
+      final iosInfo = await deviceInfo.iosInfo;
+      return iosInfo.name ?? 'iPhone';
+    } else {
+      return Platform.operatingSystem;
+    }
   }
 
 }

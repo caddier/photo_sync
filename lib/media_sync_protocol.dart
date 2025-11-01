@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:io';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
@@ -159,6 +158,13 @@ class MediaSyncProtocol {
   static Future<void> sendSyncComplete(ServerConnection conn) async {
     final packet = PacketEnc(MediaSyncPacketType.syncComplete, Uint8List(0));
     await sendPacketWithAck(conn, packet, "sync_complete");
+  }
+
+  /// Send client sync start request
+  static Future<void> sendSyncStart(ServerConnection conn, String phoneName) async {
+    // Use type 4 for sync start, data is phone name
+    final startPacket = PacketEnc(4, utf8.encode(phoneName));
+    await conn.sendData(startPacket.encode());
   }
 }
 
