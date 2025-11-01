@@ -10,10 +10,15 @@ import 'package:photo_manager/photo_manager.dart';
 
 // Optional: foreground service on Android. Native setup required in AndroidManifest.
 // import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+  
+  
+
+
 
 void main() {
   runApp(const MainApp());
 }
+
 
 class MainApp extends StatelessWidget {
   const MainApp({super.key});
@@ -21,8 +26,58 @@ class MainApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const MaterialApp(
-      home: SyncPage(),
+      home: MainTabPage(),
       debugShowCheckedModeBanner: true,
+    );
+  }
+}
+
+class MainTabPage extends StatelessWidget {
+  const MainTabPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: 3,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Photo Sync'),
+          bottom: const TabBar(
+            tabs: [
+              Tab(text: 'Sync', icon: Icon(Icons.sync)),
+              Tab(text: 'Server', icon: Icon(Icons.dns)),
+              Tab(text: 'Phone', icon: Icon(Icons.phone_android)),
+            ],
+          ),
+        ),
+        body: const TabBarView(
+          children: [
+            SyncPage(),
+            ServerTab(),
+            PhoneTab(),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class ServerTab extends StatelessWidget {
+  const ServerTab({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Text('Server tab (add server management UI here)', style: Theme.of(context).textTheme.titleLarge),
+    );
+  }
+}
+
+class PhoneTab extends StatelessWidget {
+  const PhoneTab({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Text('Phone tab (add phone info UI here)', style: Theme.of(context).textTheme.titleLarge),
     );
   }
 }
@@ -42,36 +97,6 @@ class _SyncPageState extends State<SyncPage> {
   // Synced counts
   int syncedPhotos = 0;
   int syncedVideos = 0;
-
-  Future<void> _loadSyncedCounts() async {
-    // Get all synced records
-    final syncedRecords = await history.getAllSyncedFiles();
-    
-    int photos = 0;
-    int videos = 0;
-    
-    // Count photos and videos
-    for (var record in syncedRecords) {
-      if (record.mediaType == 'photo') {
-        photos++;
-      } else if (record.mediaType == 'video') {
-        videos++;
-      }
-    }
-
-    setState(() {
-      syncedPhotos = photos;
-      syncedVideos = videos;
-    });
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    // Load both media counts and sync history
-    _loadMediaCounts();
-    _loadSyncedCounts();
-  }
 
   Future<void> _loadMediaCounts() async {
     bool permissionGranted = await MediaEnumerator.requestPermission();
@@ -97,6 +122,25 @@ class _SyncPageState extends State<SyncPage> {
     setState(() {
       totalPhotos = photos.length;
       totalVideos = videos.length;
+    });
+  }
+
+  Future<void> _loadSyncedCounts() async {
+    // Get all synced records
+    final syncedRecords = await history.getAllSyncedFiles();
+    int photos = 0;
+    int videos = 0;
+    // Count photos and videos
+    for (var record in syncedRecords) {
+      if (record.mediaType == 'photo') {
+        photos++;
+      } else if (record.mediaType == 'video') {
+        videos++;
+      }
+    }
+    setState(() {
+      syncedPhotos = photos;
+      syncedVideos = videos;
     });
   }
 
@@ -160,7 +204,7 @@ class _SyncPageState extends State<SyncPage> {
   }
 
 
-  static const int _chunkSize = 5;  // Process assets in small batches
+  final int _chunkSize = 5;  // Process assets in small batches
 
   Future<void> _syncAssets(RequestType type, String assetType, {ServerConnection? connection}) async {
     ServerConnection? conn = connection;
