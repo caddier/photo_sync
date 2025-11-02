@@ -196,6 +196,9 @@ class _SyncPageState extends State<SyncPage>
           }
         });
       }
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive || state == AppLifecycleState.detached) {
+      // In case of backgrounding during sync, force-close active connection so awaits unblock
+      try { _activeConn?.disconnect(); } catch (_) {}
     }
   }
 
@@ -263,6 +266,7 @@ class _SyncPageState extends State<SyncPage>
   bool _isSyncing = false;
   String? _syncStatus;
   bool _cancelSync = false;  // Flag to cancel ongoing sync
+  ServerConnection? _activeConn; // Currently active connection for sync (to force-cancel)
 
   // simulate discovery
   Future<void> discoverServers() async {
@@ -339,6 +343,7 @@ class _SyncPageState extends State<SyncPage>
         if (conn == null) {
         conn = await doConnectSelectedServer();
         createdConn = true;
+        _activeConn = conn;
 
         // NOTE: To run reliably in background on Android you should set up
         // a foreground service (notification) in native code or using a
@@ -368,6 +373,9 @@ class _SyncPageState extends State<SyncPage>
         for (var asset in chunk) {
           if (_cancelSync) break;
 
+          // Re-check cancel before heavy work
+          if (_cancelSync) break;
+
           // Check if already synced
           if (await history.isFileSynced(asset.id)) {
             setState(() {
@@ -382,10 +390,12 @@ class _SyncPageState extends State<SyncPage>
 
             try {
             // Convert to packet and send - do heavy work in isolate
+            if (_cancelSync) break;
             final packet = await MediaSyncProtocol.assetToPacket(asset);
             if (_cancelSync) break;
 
             final success = await MediaSyncProtocol.sendPacketWithAck(conn, packet, asset.id);
+            if (_cancelSync) break;
             
             // Only record if server acknowledged
             if (success) {
@@ -425,13 +435,17 @@ class _SyncPageState extends State<SyncPage>
           print('Error closing connection: $e');
         }
       }
+      // Clear active connection reference
+      _activeConn = null;
 
       // If you implemented a foreground service, stop it here.
-      setState(() {
-        _isSyncing = false;
-        _syncStatus = null;
-        _cancelSync = false;  // Reset cancel flag
-      });
+      if (mounted) {
+        setState(() {
+          _isSyncing = false;
+          _syncStatus = null;
+          _cancelSync = false;  // Reset cancel flag
+        });
+      }
     }
   }
 
@@ -860,6 +874,10 @@ class _SyncPageState extends State<SyncPage>
                                         _cancelSync = true;
                                         _syncStatus = 'Cancelling sync...';
                                       });
+                                      // Force-close any active connection to immediately unblock pending I/O
+                                      try {
+                                        _activeConn?.disconnect();
+                                      } catch (_) {}
                                     },
                                     icon: const Icon(Icons.stop_circle_outlined),
                                     color: Colors.red,
