@@ -304,7 +304,7 @@ class MediaThumbItem {
   };
 
   static bool _isVideoMediaType(String media) {
-    const videoTypes = {'mp4', 'mov', 'avi', 'wmv', '3gp', '3g2', 'mkv', 'webm', 'flv'};
+    const videoTypes = {'mp4', 'mov', 'avi', 'wmv', '3gp', '3g2', 'mkv', 'webm', 'flv', 'video'};
     return videoTypes.contains(media.toLowerCase());
   }
 }

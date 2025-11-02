@@ -350,10 +350,32 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
                           ),
                         ),
                         if (item.isVideo)
-                          const Positioned(
+                          Positioned(
                             right: 4,
                             bottom: 4,
-                            child: Icon(Icons.videocam, color: Colors.white, size: 20),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.6),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: const [
+                                  Icon(Icons.videocam, color: Colors.white, size: 14),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'VIDEO',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                       ],
                     );

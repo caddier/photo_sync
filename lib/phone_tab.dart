@@ -158,6 +158,53 @@ class _PhoneTabState extends State<PhoneTab> {
     }
   }
 
+  Future<void> _deleteSelectedPhotos() async {
+    if (_selectedAssets.isEmpty) return;
+    final count = _selectedAssets.length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Selected'),
+        content: Text('Delete $count selected photo${count > 1 ? 's' : ''}? This cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      final ids = _selectedAssets.toList();
+      final deletedIds = await PhotoManager.editor.deleteWithIds(ids);
+
+      // Update local state sets
+      for (final id in deletedIds) {
+        _syncedAssets.remove(id);
+        _deleteMode.remove(id);
+        _selectedAssets.remove(id);
+        _thumbCache.remove(id);
+      }
+
+      await _loadPhotos();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Deleted ${deletedIds.length} photo${deletedIds.length == 1 ? '' : 's'}'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error deleting selected: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
   void _goToPage(int index) {
     setState(() {
       _currentPage = index;
@@ -188,9 +235,24 @@ class _PhoneTabState extends State<PhoneTab> {
               if (_allAssets.isNotEmpty)
                 Text('Total: ${_allAssets.length}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
 
-              // Right: clear button if any selected
+              // Right: Clear + Delete buttons when any selected
               if (_selectedAssets.isNotEmpty)
-                TextButton(onPressed: _clearSelection, child: const Text('Clear', style: TextStyle(fontSize: 13))),
+                Row(
+                  children: [
+                    TextButton(
+                      onPressed: _clearSelection,
+                      child: const Text('Clear', style: TextStyle(fontSize: 13)),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: _deleteSelectedPhotos,
+                      child: const Text(
+                        'Delete',
+                        style: TextStyle(fontSize: 13, color: Colors.red),
+                      ),
+                    ),
+                  ],
+                ),
             ],
           ),
         ),
