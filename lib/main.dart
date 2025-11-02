@@ -4,6 +4,8 @@ import 'package:photo_sync/server_conn.dart';
 import 'package:photo_sync/sync_history.dart';
 import 'package:photo_sync/media_eumerator.dart';
 import 'package:photo_sync/media_sync_protocol.dart';
+import 'package:photo_sync/server_tab.dart';
+import 'package:photo_sync/phone_tab.dart';
 import 'package:photo_manager/photo_manager.dart';
 //dart:io will be used if/when we add platform-specific foreground service code
 // import 'dart:io' show Platform;
@@ -32,8 +34,34 @@ class MainApp extends StatelessWidget {
   }
 }
 
-class MainTabPage extends StatelessWidget {
+class MainTabPage extends StatefulWidget {
   const MainTabPage({super.key});
+
+  @override
+  State<MainTabPage> createState() => _MainTabPageState();
+}
+
+class _MainTabPageState extends State<MainTabPage> {
+  String? _selectedServerName;
+  DeviceInfo? _selectedServer;
+
+  void _updateServerName(String? serverName) {
+    print('DEBUG: _updateServerName called with: $serverName');
+    if (mounted) {
+      setState(() {
+        _selectedServerName = serverName;
+      });
+      print('DEBUG: _selectedServerName is now: $_selectedServerName');
+    }
+  }
+
+  void _onSelectedServerChanged(DeviceInfo? server) {
+    if (mounted) {
+      setState(() {
+        _selectedServer = server;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -41,9 +69,32 @@ class MainTabPage extends StatelessWidget {
       length: 3,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Photo Sync'),
-          bottom: const PreferredSize(
-            preferredSize: Size.fromHeight(36), // Reduce tab bar height
+          title: _selectedServerName == null
+              ? const Text('Photo Sync')
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Photo Sync: '),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        _selectedServerName!,
+                        style: const TextStyle(
+                          color: Colors.lightGreenAccent,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+          centerTitle: false,
+          toolbarHeight: 70, // Increased height for better visibility
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(36), // Reduce tab bar height
             child: TabBar(
               tabs: [
                 Tab(text: 'Sync', icon: Icon(Icons.sync)),
@@ -53,11 +104,14 @@ class MainTabPage extends StatelessWidget {
             ),
           ),
         ),
-        body: const TabBarView(
+        body: TabBarView(
           children: [
-            SyncPage(),
-            ServerTab(),
-            PhoneTab(),
+            SyncPage(
+              onServerSelected: _updateServerName,
+              onSelectedServerChanged: _onSelectedServerChanged,
+            ),
+            ServerTab(selectedServer: _selectedServer),
+            const PhoneTab(),
           ],
         ),
       ),
@@ -65,165 +119,23 @@ class MainTabPage extends StatelessWidget {
   }
 }
 
-
-class ServerTab extends StatefulWidget {
-  const ServerTab({super.key});
-
-  @override
-  State<ServerTab> createState() => _ServerTabState();
-}
-
-class _ServerTabState extends State<ServerTab> {
-  int _currentPage = 0;
-  static const int _itemsPerPage = 9;
-  List<ServerMediaItem> _mediaItems = [];
-  bool _loading = false;
-
-  Future<void> _refreshGallery() async {
-    if (_loading) return;
-    if (mounted) {
-      setState(() { _loading = true; });
-    }
-    // TODO: Replace with actual server API call
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    if (!mounted) return;
-
-    // Example mock data (no external URLs). Replace with real server-provided thumbnails when available.
-    setState(() {
-      _mediaItems = List.generate(30, (i) => ServerMediaItem(
-        url: null,
-        isVideo: i % 4 == 0,
-      ));
-      _loading = false;
-      _currentPage = 0;
-    });
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _refreshGallery();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final pageCount = (_mediaItems.length / _itemsPerPage).ceil();
-    final startIdx = _currentPage * _itemsPerPage;
-    final endIdx = (startIdx + _itemsPerPage).clamp(0, _mediaItems.length);
-    final pageItems = _mediaItems.sublist(startIdx, endIdx);
-
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8.0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              ElevatedButton.icon(
-                onPressed: _loading ? null : _refreshGallery,
-                icon: const Icon(Icons.refresh, size: 18),
-                label: const Text('Refresh', style: TextStyle(fontSize: 14)),
-                style: ElevatedButton.styleFrom(
-                  minimumSize: const Size(100, 32),
-                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-                ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : GridView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    mainAxisSpacing: 8,
-                    crossAxisSpacing: 8,
-                    childAspectRatio: 1,
-                  ),
-                  itemCount: pageItems.length,
-                  itemBuilder: (context, idx) {
-                    final item = pageItems[idx];
-                    return Stack(
-                      children: [
-                        Positioned.fill(
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: item.url != null && item.url!.isNotEmpty
-                                ? Image.network(
-                                    item.url!,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (c, e, s) => Container(
-                                      color: Colors.grey[300],
-                                      child: const Center(child: Icon(Icons.broken_image)),
-                                    ),
-                                  )
-                                : Container(
-                                    color: Colors.grey[300],
-                                    child: const Center(child: Icon(Icons.image, color: Colors.black45)),
-                                  ),
-                          ),
-                        ),
-                        if (item.isVideo)
-                          const Positioned(
-                            right: 4,
-                            bottom: 4,
-                            child: Icon(Icons.videocam, color: Colors.white, size: 20),
-                          ),
-                      ],
-                    );
-                  },
-                ),
-        ),
-        if (pageCount > 1)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.chevron_left),
-                  onPressed: _currentPage > 0 ? () => setState(() => _currentPage--) : null,
-                ),
-                Text('Page ${_currentPage + 1} / $pageCount', style: const TextStyle(fontSize: 13)),
-                IconButton(
-                  icon: const Icon(Icons.chevron_right),
-                  onPressed: _currentPage < pageCount - 1 ? () => setState(() => _currentPage++) : null,
-                ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-class ServerMediaItem {
-  final String? url;
-  final bool isVideo;
-  ServerMediaItem({this.url, required this.isVideo});
-}
-
-class PhoneTab extends StatelessWidget {
-  const PhoneTab({super.key});
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Text('Phone tab (add phone info UI here)', style: Theme.of(context).textTheme.titleLarge),
-    );
-  }
-}
-
 class SyncPage extends StatefulWidget {
-  const SyncPage({super.key});
+  final void Function(String?)? onServerSelected;
+  final void Function(DeviceInfo?)? onSelectedServerChanged;
+  
+  const SyncPage({super.key, this.onServerSelected, this.onSelectedServerChanged});
 
   @override
   State<SyncPage> createState() => _SyncPageState();
 }
 
-class _SyncPageState extends State<SyncPage> {
+// Export the state type for use in other files (e.g., ServerTab)
+typedef SyncPageState = _SyncPageState;
+
+enum SyncMode { none, photos, videos, all }
+
+class _SyncPageState extends State<SyncPage>
+  with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
   // Media totals
   int totalPhotos = 0;
   int totalVideos = 0;
@@ -232,11 +144,59 @@ class _SyncPageState extends State<SyncPage> {
   int syncedPhotos = 0;
   int syncedVideos = 0;
 
-    @override
+  // Lifecycle-aware sync state
+  SyncMode _activeSyncMode = SyncMode.none;
+  bool _resumeOnForeground = false;
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadMediaCounts();
     _loadSyncedCounts();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Pause ongoing sync when app is backgrounded; mark to resume on foreground
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      if (_isSyncing) {
+        _resumeOnForeground = true;
+        _cancelSync = true;
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      if (_resumeOnForeground && !_isSyncing) {
+        _resumeOnForeground = false;
+        Future.microtask(() async {
+          if (!mounted) return;
+          if (selectedServer == null) return;
+          switch (_activeSyncMode) {
+            case SyncMode.photos:
+              await doSyncPhotos();
+              break;
+            case SyncMode.videos:
+              await doSyncVideos();
+              break;
+            case SyncMode.all:
+              await _resumeSyncAll();
+              break;
+            case SyncMode.none:
+              break;
+          }
+        });
+      }
+    }
   }
 
   bool _loadingMediaCounts = false;
@@ -333,12 +293,19 @@ class _SyncPageState extends State<SyncPage> {
   }
 
   void selectServer(DeviceInfo server) {
+    print('DEBUG: selectServer called with: ${server.deviceName}');
     setState(() {
       // Toggle selection: if the same server is clicked again, deselect it
       if (selectedServer?.deviceName == server.deviceName) {
         selectedServer = null;
+        print('DEBUG: Deselected server, calling callbacks with null');
+        widget.onServerSelected?.call(null);
+        widget.onSelectedServerChanged?.call(null);
       } else {
         selectedServer = server;
+        print('DEBUG: Selected server: ${server.deviceName}, calling callbacks');
+        widget.onServerSelected?.call(server.deviceName);
+        widget.onSelectedServerChanged?.call(server);
       }
     });
   }
@@ -469,10 +436,12 @@ class _SyncPageState extends State<SyncPage> {
   }
 
   Future<void> doSyncPhotos() async {
+    _activeSyncMode = SyncMode.photos;
     await _syncAssets(RequestType.image, 'photo');
   }  
   
   Future<void> doSyncVideos() async {
+    _activeSyncMode = SyncMode.videos;
     await _syncAssets(RequestType.video, 'video');
   }
 
@@ -593,6 +562,7 @@ class _SyncPageState extends State<SyncPage> {
   }
 
   Future<void> syncAll() async {
+    _activeSyncMode = SyncMode.all;
     if (!await _checkServerSelected()) return;
 
     // If everything already synced, notify user and skip
@@ -628,25 +598,41 @@ class _SyncPageState extends State<SyncPage> {
     }
   }
 
+  // Resume logic for syncAll without resetting counters
+  Future<void> _resumeSyncAll() async {
+    if (!await _checkServerSelected()) return;
+    try {
+      var conn = await doConnectSelectedServer();
+      if (syncedPhotos < totalPhotos) {
+        await _syncAssets(RequestType.image, 'photo', connection: conn);
+      }
+      if (!_cancelSync && syncedVideos < totalVideos) {
+        await _syncAssets(RequestType.video, 'video', connection: conn);
+      }
+      if (!_cancelSync) {
+        await MediaSyncProtocol.sendSyncComplete(conn);
+      }
+      try {
+        conn.disconnect();
+      } catch (_) {}
+    } catch (e) {
+      _showErrorToast(context, 'Error resuming sync: ${e.toString()}');
+      print('Error in _resumeSyncAll: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    super.build(context); // Must call super when using AutomaticKeepAliveClientMixin
     int totalAll = totalPhotos + totalVideos;
     int syncedAll = syncedPhotos + syncedVideos;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          selectedServer == null
-              ? "Photo Sync"
-              : "Photo Sync → ${selectedServer?.deviceName}",
-        ),
-      ),
-      body: SingleChildScrollView(
-        child: Center(
-          child: Column(
-            children: [
-              const SizedBox(height: 12),
-              Card(
+    return SingleChildScrollView(
+      child: Center(
+        child: Column(
+          children: [
+            const SizedBox(height: 12),
+            Card(
                 margin: const EdgeInsets.symmetric(horizontal: 8),
                 elevation: 2,
                 shape: RoundedRectangleBorder(
@@ -1004,7 +990,6 @@ class _SyncPageState extends State<SyncPage> {
             ],
           ),
         ),
-      ),
     );
   }
 
