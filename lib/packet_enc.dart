@@ -3,6 +3,11 @@ import 'dart:convert';
 
 /// A helper class to encode and decode packets in the format:
 /// [type:1 byte][len:4 bytes][data:variable length]
+/// 
+/// // type 1 is photo packet request will be sent to server. after server recv it , it will respond with complete response  which is packet type 3
+/// // type 2 is video packet request will be sent to server. after server recv it , it will respond with complete response  which is packet type 3
+/// // type 4 is client sync start request, the data part will be the client phone name in string.
+/// 
 class PacketEnc {
   /// The type of the packet (1 byte)
   final int type;
