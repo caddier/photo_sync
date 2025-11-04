@@ -555,8 +555,9 @@ class _SyncPageState extends State<SyncPage>
   Future<void> syncPhotos() async {
     if (!await _checkServerSelected()) return;
 
-    if (syncedPhotos >= totalPhotos) {
-      _showInfoToast(context, 'All photos are already synced — no action needed.');
+    // Check if there are any photos to sync (allow sync even if syncedPhotos > totalPhotos due to deletions)
+    if (totalPhotos == 0) {
+      _showInfoToast(context, 'No photos found on device.');
       return;
     }
 
@@ -569,8 +570,9 @@ class _SyncPageState extends State<SyncPage>
   Future<void> syncVideos() async {
     if (!await _checkServerSelected()) return;
 
-    if (syncedVideos >= totalVideos) {
-      _showInfoToast(context, 'All videos are already synced — no action needed.');
+    // Check if there are any videos to sync (allow sync even if syncedVideos > totalVideos due to deletions)
+    if (totalVideos == 0) {
+      _showInfoToast(context, 'No videos found on device.');
       return;
     }
 
@@ -584,9 +586,9 @@ class _SyncPageState extends State<SyncPage>
     _activeSyncMode = SyncMode.all;
     if (!await _checkServerSelected()) return;
 
-    // If everything already synced, notify user and skip
-    if (syncedPhotos >= totalPhotos && syncedVideos >= totalVideos) {
-      _showInfoToast(context, 'All media already synced — no action needed.');
+    // Check if there's any media to sync (allow even if synced counts are higher due to deletions)
+    if (totalPhotos == 0 && totalVideos == 0) {
+      _showInfoToast(context, 'No media found on device.');
       return;
     }
 
