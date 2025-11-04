@@ -303,15 +303,20 @@ class _SyncPageState extends State<SyncPage>
       if (selectedServer?.deviceName == server.deviceName) {
         selectedServer = null;
         print('DEBUG: Deselected server, calling callbacks with null');
-        widget.onServerSelected?.call(null);
-        widget.onSelectedServerChanged?.call(null);
       } else {
         selectedServer = server;
         print('DEBUG: Selected server: ${server.deviceName}, calling callbacks');
-        widget.onServerSelected?.call(server.deviceName);
-        widget.onSelectedServerChanged?.call(server);
       }
     });
+    
+    // Call callbacks after setState to ensure state is updated first
+    if (selectedServer == null) {
+      widget.onServerSelected?.call(null);
+      widget.onSelectedServerChanged?.call(null);
+    } else {
+      widget.onServerSelected?.call(selectedServer!.deviceName);
+      widget.onSelectedServerChanged?.call(selectedServer);
+    }
   }
 
 
