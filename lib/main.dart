@@ -7,6 +7,7 @@ import 'package:photo_sync/media_sync_protocol.dart';
 import 'package:photo_sync/server_tab.dart';
 import 'package:photo_sync/phone_tab.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:url_launcher/url_launcher.dart';
 //dart:io will be used if/when we add platform-specific foreground service code
 // import 'dart:io' show Platform;
 
@@ -55,6 +56,17 @@ class _MainTabPageState extends State<MainTabPage> {
     }
   }
 
+  void _launchServerInBrowser(String ip) async {
+    final url = Uri.parse('http://$ip:8080');
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not launch $url')),
+      );
+    }
+  }
+
   void _onSelectedServerChanged(DeviceInfo? server) {
     if (mounted) {
       setState(() {
@@ -81,12 +93,33 @@ class _MainTabPageState extends State<MainTabPage> {
                         color: Colors.white.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Text(
-                        _selectedServerName!,
-                        style: const TextStyle(
-                          color: Colors.lightGreenAccent,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _selectedServerName!,
+                            style: const TextStyle(
+                              color: Colors.lightGreenAccent,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          if (_selectedServer != null && _selectedServer!.ipAddress != null)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 8),
+                              child: InkWell(
+                                onTap: () => _launchServerInBrowser(_selectedServer!.ipAddress!),
+                                child: Text(
+                                  '[${_selectedServer!.ipAddress!}]',
+                                  style: const TextStyle(
+                                    color: Colors.amberAccent,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    decoration: TextDecoration.underline,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   ],
