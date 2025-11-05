@@ -7,6 +7,7 @@ import 'package:photo_sync/media_sync_protocol.dart';
 import 'package:photo_sync/server_tab.dart';
 import 'package:photo_sync/phone_tab.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:url_launcher/url_launcher.dart';
 //dart:io will be used if/when we add platform-specific foreground service code
 // import 'dart:io' show Platform;
 
@@ -55,6 +56,17 @@ class _MainTabPageState extends State<MainTabPage> {
     }
   }
 
+  void _launchServerInBrowser(String ip) async {
+    final url = Uri.parse('http://$ip:8080');
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not launch $url')),
+      );
+    }
+  }
+
   void _onSelectedServerChanged(DeviceInfo? server) {
     if (mounted) {
       setState(() {
@@ -81,12 +93,33 @@ class _MainTabPageState extends State<MainTabPage> {
                         color: Colors.white.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Text(
-                        _selectedServerName!,
-                        style: const TextStyle(
-                          color: Colors.lightGreenAccent,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _selectedServerName!,
+                            style: const TextStyle(
+                              color: Colors.lightGreenAccent,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          if (_selectedServer != null && _selectedServer!.ipAddress != null)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 8),
+                              child: InkWell(
+                                onTap: () => _launchServerInBrowser(_selectedServer!.ipAddress!),
+                                child: Text(
+                                  '[${_selectedServer!.ipAddress!}]',
+                                  style: const TextStyle(
+                                    color: Colors.amberAccent,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    decoration: TextDecoration.underline,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   ],
@@ -303,15 +336,20 @@ class _SyncPageState extends State<SyncPage>
       if (selectedServer?.deviceName == server.deviceName) {
         selectedServer = null;
         print('DEBUG: Deselected server, calling callbacks with null');
-        widget.onServerSelected?.call(null);
-        widget.onSelectedServerChanged?.call(null);
       } else {
         selectedServer = server;
         print('DEBUG: Selected server: ${server.deviceName}, calling callbacks');
-        widget.onServerSelected?.call(server.deviceName);
-        widget.onSelectedServerChanged?.call(server);
       }
     });
+    
+    // Call callbacks after setState to ensure state is updated first
+    if (selectedServer == null) {
+      widget.onServerSelected?.call(null);
+      widget.onSelectedServerChanged?.call(null);
+    } else {
+      widget.onServerSelected?.call(selectedServer!.deviceName);
+      widget.onSelectedServerChanged?.call(selectedServer);
+    }
   }
 
 
@@ -550,8 +588,9 @@ class _SyncPageState extends State<SyncPage>
   Future<void> syncPhotos() async {
     if (!await _checkServerSelected()) return;
 
-    if (syncedPhotos >= totalPhotos) {
-      _showInfoToast(context, 'All photos are already synced — no action needed.');
+    // Check if there are any photos to sync (allow sync even if syncedPhotos > totalPhotos due to deletions)
+    if (totalPhotos == 0) {
+      _showInfoToast(context, 'No photos found on device.');
       return;
     }
 
@@ -564,8 +603,9 @@ class _SyncPageState extends State<SyncPage>
   Future<void> syncVideos() async {
     if (!await _checkServerSelected()) return;
 
-    if (syncedVideos >= totalVideos) {
-      _showInfoToast(context, 'All videos are already synced — no action needed.');
+    // Check if there are any videos to sync (allow sync even if syncedVideos > totalVideos due to deletions)
+    if (totalVideos == 0) {
+      _showInfoToast(context, 'No videos found on device.');
       return;
     }
 
@@ -579,9 +619,9 @@ class _SyncPageState extends State<SyncPage>
     _activeSyncMode = SyncMode.all;
     if (!await _checkServerSelected()) return;
 
-    // If everything already synced, notify user and skip
-    if (syncedPhotos >= totalPhotos && syncedVideos >= totalVideos) {
-      _showInfoToast(context, 'All media already synced — no action needed.');
+    // Check if there's any media to sync (allow even if synced counts are higher due to deletions)
+    if (totalPhotos == 0 && totalVideos == 0) {
+      _showInfoToast(context, 'No media found on device.');
       return;
     }
 

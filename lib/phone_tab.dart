@@ -107,10 +107,6 @@ class _PhoneTabState extends State<PhoneTab> {
     });
   }
 
-  void _clearSelection() {
-    setState(() => _selectedAssets.clear());
-  }
-
   void _toggleDeleteMode(String id) {
     setState(() {
       if (_deleteMode.contains(id)) {
@@ -121,46 +117,11 @@ class _PhoneTabState extends State<PhoneTab> {
     });
   }
 
-  Future<void> _deletePhoto(AssetEntity asset) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete Photo'),
-        content: const Text('Are you sure you want to delete this photo? This cannot be undone.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Delete', style: TextStyle(color: Colors.red))),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-
-    try {
-      final deletedIds = await PhotoManager.editor.deleteWithIds([asset.id]);
-      if (deletedIds.isNotEmpty) {
-        _syncedAssets.remove(asset.id);
-        await _loadPhotos();
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Photo deleted'), backgroundColor: Colors.green),
-        );
-      } else {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to delete photo'), backgroundColor: Colors.red),
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error deleting photo: $e'), backgroundColor: Colors.red),
-      );
-    }
-  }
-
   Future<void> _deleteSelectedPhotos() async {
-    if (_selectedAssets.isEmpty) return;
-    final count = _selectedAssets.length;
+    // Combine both selected assets and delete mode assets
+    final toDelete = <String>{..._selectedAssets, ..._deleteMode};
+    if (toDelete.isEmpty) return;
+    final count = toDelete.length;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -178,8 +139,15 @@ class _PhoneTabState extends State<PhoneTab> {
     if (confirmed != true) return;
 
     try {
-      final ids = _selectedAssets.toList();
+      final ids = toDelete.toList();
+      
+      print('DEBUG: Attempting to delete ${ids.length} photos in a single call');
+      print('DEBUG: IDs: $ids');
+      
+      // Use deleteWithIds which should show a single system dialog on Android 11+
       final deletedIds = await PhotoManager.editor.deleteWithIds(ids);
+      
+      print('DEBUG: Successfully deleted ${deletedIds.length} photos');
 
       // Update local state sets
       for (final id in deletedIds) {
@@ -235,20 +203,25 @@ class _PhoneTabState extends State<PhoneTab> {
               if (_allAssets.isNotEmpty)
                 Text('Total: ${_allAssets.length}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
 
-              // Right: Clear + Delete buttons when any selected
-              if (_selectedAssets.isNotEmpty)
+              // Right: Clear + Delete buttons when any selected or in delete mode
+              if (_selectedAssets.isNotEmpty || _deleteMode.isNotEmpty)
                 Row(
                   children: [
                     TextButton(
-                      onPressed: _clearSelection,
+                      onPressed: () {
+                        setState(() {
+                          _selectedAssets.clear();
+                          _deleteMode.clear();
+                        });
+                      },
                       child: const Text('Clear', style: TextStyle(fontSize: 13)),
                     ),
                     const SizedBox(width: 8),
                     TextButton(
                       onPressed: _deleteSelectedPhotos,
-                      child: const Text(
-                        'Delete',
-                        style: TextStyle(fontSize: 13, color: Colors.red),
+                      child: Text(
+                        'Delete (${_selectedAssets.length + _deleteMode.length})',
+                        style: const TextStyle(fontSize: 13, color: Colors.red),
                       ),
                     ),
                   ],
@@ -325,7 +298,7 @@ class _PhoneTabState extends State<PhoneTab> {
                             ),
                             child: Center(
                               child: GestureDetector(
-                                onTap: () => _deletePhoto(asset),
+                                onTap: () => _toggleDeleteMode(asset.id),
                                 child: Container(
                                   padding: const EdgeInsets.all(12),
                                   decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
