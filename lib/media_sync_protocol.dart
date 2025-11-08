@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
@@ -13,8 +12,9 @@ class AssetData {
   final String path;
   final String? mimeType;
   final AssetType type;
+  final Uint8List? bytes; // Add bytes field for iOS compatibility
 
-  AssetData(this.id, this.path, this.mimeType, this.type);
+  AssetData(this.id, this.path, this.mimeType, this.type, {this.bytes});
 }
 
 // Packet types for media sync
@@ -66,19 +66,20 @@ class MediaSyncProtocol {
 
   /// Prepare asset data for isolate
   static Future<AssetData> prepareAssetData(AssetEntity asset) async {
-    final file = await asset.file;
-    if (file == null) {
-      throw Exception('Could not get file for asset ${asset.id}');
+    // On iOS, asset.file returns internal .bin paths that can't be read directly
+    // Use originBytes instead which works on both platforms
+    final bytes = await asset.originBytes;
+    if (bytes == null) {
+      throw Exception('Could not get bytes for asset ${asset.id}');
     }
-    return AssetData(asset.id, file.path, asset.mimeType, asset.type);
+    return AssetData(asset.id, '', asset.mimeType, asset.type, bytes: bytes);
   }
 
   /// Process asset in isolate - this is the isolate entry point
   static Future<PacketEnc> processAssetInIsolate(AssetData data) async {
-    // Read file bytes directly using path
-    final file = File(data.path);
-    final bytes = await file.readAsBytes();
-    print('Reading file at path: ${data.path}, bytes length: ${file.lengthSync()}');
+    // Use the bytes directly (already loaded from originBytes)
+    final bytes = data.bytes!;
+    print('Processing asset: ${data.id}, bytes length: ${bytes.length}');
     // Convert to base64
     final base64Data = base64Encode(bytes);
     
