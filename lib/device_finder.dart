@@ -204,10 +204,17 @@ static String calculateBroadcastAddress(String ip, String mask) {
     final deviceInfo = DeviceInfoPlugin();
     if (Platform.isAndroid) {
       final androidInfo = await deviceInfo.androidInfo;
-      return androidInfo.model ?? 'Android';
+      return androidInfo.model.isNotEmpty ? androidInfo.model : 'Android';
     } else if (Platform.isIOS) {
       final iosInfo = await deviceInfo.iosInfo;
-      return iosInfo.name ?? 'iPhone';
+      // iosInfo.name is deprecated and often empty
+      // Use utsname.nodename (user's device name like "Jason's iPhone")
+      // Fall back to model (like "iPhone 14 Pro") if nodename is empty
+      final nodeName = iosInfo.utsname.nodename;
+      if (nodeName.isNotEmpty) {
+        return nodeName;
+      }
+      return iosInfo.model.isNotEmpty ? iosInfo.model : 'iPhone';
     } else {
       return Platform.operatingSystem;
     }
