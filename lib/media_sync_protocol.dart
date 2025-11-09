@@ -18,18 +18,62 @@ class AssetData {
 
 // Packet types for media sync
 class MediaSyncPacketType {
+  /// Type 1: Photo packet - client sends photo data to server
+  /// Format: { "id": "IMG_123.jpg", "data": "base64_encoded_photo_data", "media": "jpg" }
+  /// Server responds with syncComplete (type 3) containing "OK:IMG_123.jpg"
   static const int photo = 1;
+  
+  /// Type 2: Video packet - client sends video data to server
+  /// Format: { "id": "VID_456.mp4", "data": "base64_encoded_video_data", "media": "mp4" }
+  /// Server responds with syncComplete (type 3) containing "OK:VID_456.mp4"
   static const int video = 2;
+  
+  /// Type 3: Sync complete / acknowledgment
+  /// Format (as response): "OK:filename" (e.g., "OK:IMG_123.jpg")
+  /// Format (as final signal): empty data (Uint8List(0))
   static const int syncComplete = 3;
-  static const int syncStart = 4; // client sync start request , set client phone name as data
-  static const int getMediaCount = 5; // get total media count request
-  static const int mediaCountRsp = 6; // response with total media count
-  static const int mediaThumbList = 7; // request for media thumbnail list, there is a page index and page size in data
-  static const int mediaThumbData = 8; // response with media thumbnail data
-  static const int mediaDelList = 9; // request for media deletion list
-  static const int mediaDelAck = 10; // acknowledgment for media deletion request
-  static const int mediaDownloadList = 11; // request for media download
-  static const int mediaDownloadAck = 12; // acknowledgment for media download request
+  
+  /// Type 4: Sync start - client initiates sync session with device name
+  /// Format: "device_name_string" (e.g., "John's iPhone")
+  /// No server response expected
+  static const int syncStart = 4;
+  
+  /// Type 5: Get media count request - client requests total media count from server
+  /// Format: empty data (Uint8List(0))
+  /// Server responds with mediaCountRsp (type 6)
+  static const int getMediaCount = 5;
+  
+  /// Type 6: Media count response - server sends total media count
+  /// Format: 4-byte or 8-byte big-endian integer (e.g., 0x00000042 for count=66)
+  /// Fallback: UTF-8 string representation (e.g., "42")
+  static const int mediaCountRsp = 6;
+  
+  /// Type 7: Media thumbnail list request - client requests page of thumbnails
+  /// Format: { "pageIndex": 0, "pageSize": 12 }
+  /// Server responds with mediaThumbData (type 8)
+  static const int mediaThumbList = 7;
+  
+  /// Type 8: Media thumbnail data response - server sends thumbnail page
+  /// Format: { "photos": [ { "id": "IMG_123.jpg", "media": "jpg", "data": "base64_thumb" }, ... ] }
+  static const int mediaThumbData = 8;
+  
+  /// Type 9: Media deletion list - client sends list of media to delete
+  /// Format: [ "IMG_123.jpg", "VID_456.mp4", ... ]
+  /// Server responds with mediaDelAck (type 10)
+  static const int mediaDelList = 9;
+  
+  /// Type 10: Media deletion acknowledgment - server confirms deletion
+  /// Format: "OK" or error message
+  static const int mediaDelAck = 10;
+  
+  /// Type 11: Media download list - client requests list of media to download
+  /// Format: [ "IMG_123.jpg", "VID_456.mp4", ... ]
+  /// Server responds with mediaDownloadAck (type 12)
+  static const int mediaDownloadList = 11;
+  
+  /// Type 12: Media download acknowledgment - server sends requested media
+  /// Format: media file data or error message
+  static const int mediaDownloadAck = 12;
 }
 
 class MediaPacket {

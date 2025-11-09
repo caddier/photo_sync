@@ -769,61 +769,52 @@ class _SyncPageState extends State<SyncPage>
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.all(10),
-                  child: Column(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.phone_android,
-                            size: 18,
-                            color: Theme.of(context).primaryColor,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            "Device Name",
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: Theme.of(context).primaryColor,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ],
+                      Icon(Icons.phone_android,
+                        size: 20,
+                        color: Theme.of(context).primaryColor,
                       ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _deviceNameController,
-                              decoration: InputDecoration(
-                                hintText: 'Enter device name',
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                isDense: true,
-                              ),
-                              style: const TextStyle(fontSize: 14),
-                              onSubmitted: _saveDeviceName,
+                      const SizedBox(width: 6),
+                      Text(
+                        "Device Name:",
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).primaryColor,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: _deviceNameController,
+                          decoration: InputDecoration(
+                            hintText: 'Enter device name',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          ElevatedButton(
-                            onPressed: () => _saveDeviceName(_deviceNameController.text),
-                            style: ElevatedButton.styleFrom(
-                              minimumSize: const Size(60, 36),
-                              padding: const EdgeInsets.symmetric(horizontal: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
                             ),
-                            child: const Text("Save", style: TextStyle(fontSize: 14)),
+                            isDense: true,
                           ),
-                        ],
+                          style: const TextStyle(fontSize: 14),
+                          onSubmitted: _saveDeviceName,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton.icon(
+                        onPressed: () => _saveDeviceName(_deviceNameController.text),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        icon: const Icon(Icons.save, size: 16),
+                        label: const Text("Save", style: TextStyle(fontSize: 14)),
                       ),
                     ],
                   ),
@@ -837,38 +828,33 @@ class _SyncPageState extends State<SyncPage>
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.all(10),
-                  child: Column(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.wifi_find,
-                            size: 18,
-                            color: Theme.of(context).primaryColor,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            "Server Discovery",
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: Theme.of(context).primaryColor,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ],
+                      Icon(Icons.wifi_find,
+                        size: 18,
+                        color: Theme.of(context).primaryColor,
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(width: 6),
+                      Text(
+                        "Server Discovery",
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).primaryColor,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
                       ElevatedButton(
                         onPressed: discoverServers,
                         style: ElevatedButton.styleFrom(
-                          minimumSize: const Size(120, 32),
-                          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+                          minimumSize: const Size(100, 28),
+                          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
                         ),
-                        child: const Text("Discover Servers", style: TextStyle(fontSize: 14)),
+                        child: const Text("Discover Servers", style: TextStyle(fontSize: 12)),
                       ),
                     ],
                   ),
@@ -876,25 +862,33 @@ class _SyncPageState extends State<SyncPage>
               ),
               const SizedBox(height: 6),
               if (discoveredServers.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Column(
-                  children: discoveredServers.map((server) {
-                    return Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Checkbox(
-                          value: selectedServer?.deviceName == server.deviceName,
-                          onChanged: (_) => selectServer(server),
-                          visualDensity: VisualDensity.compact,
-                        ),
-                        Text(server.deviceName, style: const TextStyle(fontSize: 13)),
-                      ],
-                    );
-                  }).toList(),
+                Card(
+                  margin: const EdgeInsets.symmetric(horizontal: 8),
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Column(
+                      children: discoveredServers.map((server) {
+                        return Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Checkbox(
+                              value: selectedServer?.deviceName == server.deviceName,
+                              onChanged: (_) => selectServer(server),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            Text(server.deviceName, style: const TextStyle(fontSize: 13)),
+                          ],
+                        );
+                      }).toList(),
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 10),
-              ] else
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
+              ],
               Card(
                 margin: const EdgeInsets.symmetric(horizontal: 8),
                 elevation: 2,
