@@ -28,6 +28,10 @@ class SyncHistory {
   SyncHistory._internal();
 
   Database? _db;
+  
+  // Cache for synced file IDs
+  Set<String>? _syncedFileIdsCache;
+  Set<String>? _syncedFileIdsWithoutExtCache;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -124,6 +128,52 @@ class SyncHistory {
     return false;
   }
 
+  /// Load all synced file IDs into cache (call this once when phone tab loads)
+  Future<void> loadSyncedFilesCache() async {
+    final db = await database;
+    final records = await db.query('sync_history', columns: ['file_id']);
+    
+    _syncedFileIdsCache = records.map((r) => r['file_id'] as String).toSet();
+    _syncedFileIdsWithoutExtCache = records.map((r) {
+      final fileId = r['file_id'] as String;
+      return _getFilenameWithoutExt(fileId);
+    }).toSet();
+    
+    print('[SyncHistory] Cache loaded: ${_syncedFileIdsCache!.length} files');
+  }
+
+  /// Check if a file is synced using cache (much faster than isFileSynced)
+  /// Call loadSyncedFilesCache() first to populate the cache
+  bool isFileSyncedCached(String fileId) {
+    if (_syncedFileIdsCache == null || _syncedFileIdsWithoutExtCache == null) {
+      throw StateError('Cache not loaded. Call loadSyncedFilesCache() first.');
+    }
+    
+    // Normalize the fileId by replacing / with _
+    final normalizedFileId = fileId.replaceAll('/', '_');
+    
+    // First try exact match with normalized ID
+    if (_syncedFileIdsCache!.contains(normalizedFileId)) {
+      return true;
+    }
+    
+    // Also try original fileId for backward compatibility
+    if (_syncedFileIdsCache!.contains(fileId)) {
+      return true;
+    }
+    
+    // Try matching by filename without extension (normalized)
+    final filenameWithoutExt = _getFilenameWithoutExt(normalizedFileId);
+    return _syncedFileIdsWithoutExtCache!.contains(filenameWithoutExt);
+  }
+
+  /// Clear the cache (call when records are added or deleted)
+  void clearCache() {
+    _syncedFileIdsCache = null;
+    _syncedFileIdsWithoutExtCache = null;
+    print('[SyncHistory] Cache cleared');
+  }
+
   /// Record a successful sync
   /// Normalizes fileId by replacing / with _ for consistency
   Future<void> recordSync(String fileId, String fileType) async {
@@ -141,6 +191,9 @@ class SyncHistory {
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+    
+    // Clear cache since database changed
+    clearCache();
   }
 
   /// Get all records
@@ -152,13 +205,17 @@ class SyncHistory {
   /// Delete a record by id
   Future<int> deleteRecord(int id) async {
     final db = await database;
-    return await db.delete('sync_history', where: 'id = ?', whereArgs: [id]);
+    final result = await db.delete('sync_history', where: 'id = ?', whereArgs: [id]);
+    clearCache();
+    return result;
   }
 
   /// Delete all records
   Future<int> clearHistory() async {
     final db = await database;
-    return await db.delete('sync_history');
+    final result = await db.delete('sync_history');
+    clearCache();
+    return result;
   }
 
   Future<int> getRecordCount() async {
@@ -315,6 +372,11 @@ class SyncHistory {
       }
       
       print('Database sync complete: removed ${toDelete.length} orphaned records');
+      
+      // Clear cache since database changed
+      if (toDelete.isNotEmpty) {
+        clearCache();
+      }
     } catch (e) {
       print('Error syncing database with server: $e');
       rethrow;
@@ -344,6 +406,7 @@ class SyncHistory {
   Future<void> removeFileRecord(String fileId) async {
     final db = await database;
     await db.delete('sync_history', where: 'file_id = ?', whereArgs: [fileId]);
+    clearCache();
   }
 
   Future<void> close() async {

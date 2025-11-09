@@ -20,6 +20,8 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
   final Set<String> _selectedPhotos = <String>{};
   final Set<String> _syncedPhotos = <String>{};
   final Set<String> _deletePhotos = <String>{};
+  final Map<String, bool> _photoSyncStatusCache = {}; // Cache: asset.id -> isSynced
+  final Map<String, String> _photoFilenameCache = {}; // Cache: asset.id -> filename
   final int _itemsPerPage = 12;
 
   List<AssetEntity> _allPhotos = <AssetEntity>[];
@@ -33,6 +35,8 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
   final Set<String> _selectedVideos = <String>{};
   final Set<String> _syncedVideos = <String>{};
   final Set<String> _deleteVideos = <String>{};
+  final Map<String, bool> _videoSyncStatusCache = {}; // Cache: asset.id -> isSynced
+  final Map<String, String> _videoFilenameCache = {}; // Cache: asset.id -> filename
 
   List<AssetEntity> _allVideos = <AssetEntity>[];
   List<AssetEntity> _displayedVideos = <AssetEntity>[];
@@ -44,8 +48,14 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _loadCache();
     _loadPhotos();
     _loadVideos();
+  }
+
+  Future<void> _loadCache() async {
+    // Load the sync status cache once at startup
+    await _history.loadSyncedFilesCache();
   }
 
   @override
@@ -137,17 +147,37 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
     
     try {
       final syncedIds = <String>{};
-      // Only check the currently displayed photos instead of all photos
-      for (final a in _displayedPhotos) {
-        // Get the filename for this asset (same way as sync process)
-        final assetFilename = await MediaSyncProtocol.getAssetFilename(a);
+      
+      // Check all displayed photos in parallel for better performance
+      await Future.wait(_displayedPhotos.map((a) async {
+        // Check cache first
+        if (_photoSyncStatusCache.containsKey(a.id)) {
+          if (_photoSyncStatusCache[a.id]!) {
+            syncedIds.add(a.id);
+          }
+          return;
+        }
         
-        // Pass the full filename WITH extension (same as sync process)
-        final isSynced = await _history.isFileSynced(assetFilename);
+        // Get filename (cache it too)
+        String assetFilename;
+        if (_photoFilenameCache.containsKey(a.id)) {
+          assetFilename = _photoFilenameCache[a.id]!;
+        } else {
+          assetFilename = await MediaSyncProtocol.getAssetFilename(a);
+          _photoFilenameCache[a.id] = assetFilename;
+        }
+        
+        // Check sync status using cached database lookup
+        final isSynced = _history.isFileSyncedCached(assetFilename);
+        
+        // Store in cache
+        _photoSyncStatusCache[a.id] = isSynced;
+        
         if (isSynced) {
           syncedIds.add(a.id);
         }
-      }
+      }));
+      
       if (!mounted) return;
       setState(() {
         // Only update the synced status for displayed photos, preserve others
@@ -168,17 +198,37 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
     
     try {
       final syncedIds = <String>{};
-      // Only check the currently displayed videos instead of all videos
-      for (final a in _displayedVideos) {
-        // Get the filename for this asset (same way as sync process)
-        final assetFilename = await MediaSyncProtocol.getAssetFilename(a);
+      
+      // Check all displayed videos in parallel for better performance
+      await Future.wait(_displayedVideos.map((a) async {
+        // Check cache first
+        if (_videoSyncStatusCache.containsKey(a.id)) {
+          if (_videoSyncStatusCache[a.id]!) {
+            syncedIds.add(a.id);
+          }
+          return;
+        }
         
-        // Pass the full filename WITH extension (same as sync process)
-        final isSynced = await _history.isFileSynced(assetFilename);
+        // Get filename (cache it too)
+        String assetFilename;
+        if (_videoFilenameCache.containsKey(a.id)) {
+          assetFilename = _videoFilenameCache[a.id]!;
+        } else {
+          assetFilename = await MediaSyncProtocol.getAssetFilename(a);
+          _videoFilenameCache[a.id] = assetFilename;
+        }
+        
+        // Check sync status using cached database lookup
+        final isSynced = _history.isFileSyncedCached(assetFilename);
+        
+        // Store in cache
+        _videoSyncStatusCache[a.id] = isSynced;
+        
         if (isSynced) {
           syncedIds.add(a.id);
         }
-      }
+      }));
+      
       if (!mounted) return;
       setState(() {
         // Only update the synced status for displayed videos, preserve others
@@ -288,6 +338,8 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
         _deletePhotos.remove(id);
         _selectedPhotos.remove(id);
         _photoThumbCache.remove(id);
+        _photoSyncStatusCache.remove(id);
+        _photoFilenameCache.remove(id);
       }
 
       await _loadPhotos();
@@ -335,6 +387,8 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
         _deleteVideos.remove(id);
         _selectedVideos.remove(id);
         _videoThumbCache.remove(id);
+        _videoSyncStatusCache.remove(id);
+        _videoFilenameCache.remove(id);
       }
 
       await _loadVideos();
