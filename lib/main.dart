@@ -188,6 +188,9 @@ class _SyncPageState extends State<SyncPage>
   SyncMode _activeSyncMode = SyncMode.none;
   bool _resumeOnForeground = false;
 
+  // Device name lock state
+  bool _deviceNameLocked = false;
+
   @override
   bool get wantKeepAlive => true;
 
@@ -195,9 +198,13 @@ class _SyncPageState extends State<SyncPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _deviceNameController.addListener(() {
+      setState(() {});  // Trigger rebuild when device name changes
+    });
     _loadMediaCounts();
     _loadSyncedCounts();
     _loadDeviceName();
+    _checkDeviceNameLock();
   }
 
   @override
@@ -226,12 +233,20 @@ class _SyncPageState extends State<SyncPage>
     }
   }
 
+  Future<void> _checkDeviceNameLock() async {
+    final hasSynced = await history.hasSyncedBefore();
+    setState(() {
+      _deviceNameLocked = hasSynced;
+    });
+  }
+
   Future<void> _saveDeviceName(String name) async {
     if (name.trim().isEmpty) {
       _showErrorToast(context, 'Device name cannot be empty');
       return;
     }
     await history.saveDeviceName(name.trim());
+    _showInfoToast(context, 'Device name saved successfully');
   }
 
   @override
@@ -411,7 +426,7 @@ class _SyncPageState extends State<SyncPage>
   }
 
 
-  final int _chunkSize = 5;  // Process assets in small batches
+  final int _chunkSize = 5;  // Process image assets in small batches (videos always process 1 at a time)
 
   Future<void> _syncAssets(RequestType type, String assetType, {ServerConnection? connection}) async {
     // Don't start a new sync if cancel was requested or user cancelled
@@ -446,48 +461,42 @@ class _SyncPageState extends State<SyncPage>
         pageCount: 1000000,
       );
 
-  // Process assets in chunks to keep UI responsive
-      for (var i = 0; i < assets.length; i += _chunkSize) {
+      // For videos, process one at a time to avoid memory issues
+      // For images, process in chunks for better performance
+      final effectiveChunkSize = type == RequestType.video ? 1 : _chunkSize;
+
+      // Process assets in chunks (1 for videos, _chunkSize for images)
+      for (var i = 0; i < assets.length; i += effectiveChunkSize) {
         if (_cancelSync) {
           _showErrorToast(context, 'Sync cancelled');
           break;
         }
 
         setState(() {
-          _syncStatus = 'Processing ${i + 1} to ${(i + _chunkSize).clamp(0, assets.length)} of ${assets.length} ${assetType}s...';
+          if (type == RequestType.video) {
+            _syncStatus = 'Processing video ${i + 1} of ${assets.length}...';
+          } else {
+            _syncStatus = 'Processing ${i + 1} to ${(i + effectiveChunkSize).clamp(0, assets.length)} of ${assets.length} ${assetType}s...';
+          }
         });
 
-        final chunk = assets.skip(i).take(_chunkSize);
+        final chunk = assets.skip(i).take(effectiveChunkSize);
         for (var asset in chunk) {
           if (_cancelSync) break;
 
           // Re-check cancel before heavy work
           if (_cancelSync) break;
 
-          // Check if already synced
-          if (await history.isFileSynced(asset.id)) {
-            setState(() {
-              if (type == RequestType.image) {
-                syncedPhotos++;
-              } else {
-                syncedVideos++;
-              }
-            });
-            continue;  // Skip already synced assets
-          }
-
-            try {
-            // Convert to packet and send - do heavy work in isolate
+          try {
+            // Step 1: Get filename WITHOUT loading full file data
             if (_cancelSync) break;
-            final packet = await MediaSyncProtocol.assetToPacket(asset);
-            if (_cancelSync) break;
-
-            final success = await MediaSyncProtocol.sendPacketWithAck(conn, packet);
-            if (_cancelSync) break;
+            print('Getting filename for asset: ${asset.id}');
+            final fileId = await MediaSyncProtocol.getAssetFilename(asset);
+            print('Filename determined: $fileId');
             
-            // Only record if server acknowledged
-            if (success) {
-              await history.recordSync(asset.id, assetType);
+            // Step 2: Check if already synced BEFORE loading the file
+            if (await history.isFileSynced(fileId)) {
+              print('Asset $fileId already synced, skipping (file not loaded)');
               setState(() {
                 if (type == RequestType.image) {
                   syncedPhotos++;
@@ -495,17 +504,87 @@ class _SyncPageState extends State<SyncPage>
                   syncedVideos++;
                 }
               });
+              continue;  // Skip already synced assets - saves memory!
+            }
+
+            bool success = false;
+            
+            // Step 3: For videos, use chunked upload; for images, use regular packet
+            if (type == RequestType.video) {
+              // Videos: Use chunked upload to avoid loading entire file into memory
+              if (_cancelSync) break;
+              print('Starting chunked upload for video: $fileId');
+              
+              // Extract media type from filename
+              String mediaType = 'mp4';
+              final dotIndex = fileId.lastIndexOf('.');
+              if (dotIndex != -1 && dotIndex < fileId.length - 1) {
+                mediaType = fileId.substring(dotIndex + 1).toLowerCase();
+              }
+              
+              success = await MediaSyncProtocol.sendVideoWithChunks(
+                conn,
+                asset,
+                fileId,
+                mediaType,
+                shouldCancel: () => _cancelSync,
+                onProgress: (current, total) {
+                  // Update status with chunk progress
+                  final progress = (current / total * 100).toStringAsFixed(1);
+                  setState(() {
+                    _syncStatus = 'Uploading video ${i + 1}/${assets.length}: chunk $current/$total ($progress%)';
+                  });
+                },
+              );
+              if (_cancelSync) break;
+              print('Chunked upload result for $fileId: $success');
             } else {
-              print('Server failed to acknowledge $assetType ${asset.id}');
+              // Images: Use regular packet method (they're typically small)
+              if (_cancelSync) break;
+              print('Converting image to packet: ${asset.id}');
+              final packet = await MediaSyncProtocol.assetToPacket(asset);
+              if (_cancelSync) break;
+              print('Packet created for: $fileId');
+
+              print('Sending $assetType $fileId to server...');
+              success = await MediaSyncProtocol.sendPacketWithAck(
+                conn, 
+                packet, 
+                null, // fileId will be extracted from packet
+                () => _cancelSync, // Pass cancel check function
+              );
+              if (_cancelSync) break;
+              print('Server ACK received for $fileId: $success');
+            }
+            
+            // Step 4: Record sync if successful
+            if (success) {
+              await history.recordSync(fileId, assetType);
+              setState(() {
+                if (type == RequestType.image) {
+                  syncedPhotos++;
+                } else {
+                  syncedVideos++;
+                }
+              });
+              print('Successfully synced $assetType $fileId');
+            } else {
+              print('Server failed to acknowledge $assetType $fileId');
             }
           } catch (e) {
-            print('Error syncing $assetType ${asset.id}: $e');
+            print('Error syncing $assetType: $e');
             // Continue with next asset even if one fails
+          }
+          
+          // For videos, add extra delay after each video to ensure memory is freed
+          if (type == RequestType.video && !_cancelSync) {
+            print('Waiting 200ms before next video to free memory...');
+            await Future.delayed(const Duration(milliseconds: 200));
           }
         }
 
-        if (!_cancelSync) {
-          // Small delay between chunks to keep UI responsive
+        // Small delay between chunks for images only (videos already have per-item delay)
+        if (type == RequestType.image && !_cancelSync) {
           await Future.delayed(const Duration(milliseconds: 50));
         }
       }
@@ -515,22 +594,26 @@ class _SyncPageState extends State<SyncPage>
         _showErrorToast(context, 'Error syncing $assetType: ${e.toString()}');
       }
     } finally {
-      // Always send sync complete signal to server if we created the connection
+      // Always send sync complete signal to server if we have a connection and created it
       // This ensures the server generates thumbnails even if sync was cancelled
-      if (createdConn && conn != null) {
+      if (conn != null && createdConn) {
         try {
-          print('Sending sync complete signal to server...');
+          print('Sending sync complete signal to server ($assetType, createdConn=$createdConn)...');
           await MediaSyncProtocol.sendSyncComplete(conn);
+          print('Sync complete signal sent successfully for $assetType');
         } catch (e) {
-          print('Error sending sync complete: $e');
+          print('Error sending sync complete for $assetType: $e');
         }
         
-        // Now close the connection
+        // Now close the connection we created
         try {
           conn.disconnect();
+          print('Connection closed for $assetType');
         } catch (e) {
-          print('Error closing connection: $e');
+          print('Error closing connection for $assetType: $e');
         }
+      } else {
+        print('Skipping sync complete for $assetType (conn=$conn, createdConn=$createdConn)');
       }
       // Clear active connection reference
       _activeConn = null;
@@ -544,6 +627,8 @@ class _SyncPageState extends State<SyncPage>
             _cancelSync = false;  // Only reset cancel flag if not user-cancelled
           }
         });
+        // Check and update device name lock after sync completes
+        await _checkDeviceNameLock();
       }
     }
   }
@@ -632,6 +717,7 @@ class _SyncPageState extends State<SyncPage>
     try {
       await history.clearHistory();
       await _loadSyncedCounts();
+      await _checkDeviceNameLock();  // Unlock device name after clearing history
       setState(() {
         syncedPhotos = 0;
         syncedVideos = 0;
@@ -773,7 +859,8 @@ class _SyncPageState extends State<SyncPage>
                   padding: const EdgeInsets.all(12),
                   child: Row(
                     children: [
-                      Icon(Icons.phone_android,
+                      Icon(
+                        _deviceNameLocked ? Icons.lock : Icons.phone_android,
                         size: 20,
                         color: Theme.of(context).primaryColor,
                       ),
@@ -790,8 +877,10 @@ class _SyncPageState extends State<SyncPage>
                       Expanded(
                         child: TextField(
                           controller: _deviceNameController,
+                          enabled: !_deviceNameLocked,
+                          readOnly: _deviceNameLocked,
                           decoration: InputDecoration(
-                            hintText: 'Enter device name',
+                            hintText: _deviceNameLocked ? 'Locked after first sync' : 'Enter device name',
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
                             ),
@@ -800,23 +889,26 @@ class _SyncPageState extends State<SyncPage>
                               vertical: 10,
                             ),
                             isDense: true,
+                            filled: _deviceNameLocked,
+                            fillColor: _deviceNameLocked ? Colors.grey.shade200 : null,
                           ),
                           style: const TextStyle(fontSize: 14),
-                          onSubmitted: _saveDeviceName,
+                          onSubmitted: _deviceNameLocked ? null : _saveDeviceName,
                         ),
                       ),
                       const SizedBox(width: 8),
-                      ElevatedButton.icon(
-                        onPressed: () => _saveDeviceName(_deviceNameController.text),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
+                      if (!_deviceNameLocked)
+                        ElevatedButton.icon(
+                          onPressed: () => _saveDeviceName(_deviceNameController.text),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
                           ),
+                          icon: const Icon(Icons.save, size: 16),
+                          label: const Text("Save", style: TextStyle(fontSize: 14)),
                         ),
-                        icon: const Icon(Icons.save, size: 16),
-                        label: const Text("Save", style: TextStyle(fontSize: 14)),
-                      ),
                     ],
                   ),
                 ),
@@ -1081,7 +1173,7 @@ class _SyncPageState extends State<SyncPage>
                               const SizedBox(height: 4),
                             ],
                             ElevatedButton(
-                              onPressed: _isSyncing ? null : syncAll,
+                              onPressed: (_isSyncing || _deviceNameController.text.trim().isEmpty) ? null : syncAll,
                               style: ElevatedButton.styleFrom(
                                 minimumSize: const Size(120, 32),
                                 padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),

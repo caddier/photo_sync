@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:photo_manager/photo_manager.dart';
@@ -15,6 +16,9 @@ class AssetData {
 
   AssetData(this.id, this.path, this.type, {this.bytes});
 }
+
+//the over packet format is type(1byte) len(4bytes) data
+//type are the following.
 
 // Packet types for media sync
 class MediaSyncPacketType {
@@ -74,6 +78,21 @@ class MediaSyncPacketType {
   /// Type 12: Media download acknowledgment - server sends requested media
   /// Format: media file data or error message
   static const int mediaDownloadAck = 12;
+  
+  /// Type 13: Chunked video start - client initiates chunked video transfer
+  /// Format: { "id": "VID_456.mp4", "media": "mp4", "totalSize": 1234567890, "chunkSize": 10485760, "totalChunks": 118 }
+  /// Server responds with syncComplete (type 3) containing "OK:START"
+  static const int chunkedVideoStart = 13;
+  
+  /// Type 14: Chunked video data - client sends one chunk of video data
+  /// Format: { "id": "VID_456.mp4", "chunkIndex": 0, "data": "base64_chunk_data" }
+  /// Server responds with syncComplete (type 3) containing "OK:CHUNK:0"
+  static const int chunkedVideoData = 14;
+  
+  /// Type 15: Chunked video complete - client signals all chunks sent
+  /// Format: { "id": "VID_456.mp4", "totalChunks": 118 }
+  /// Server responds with syncComplete (type 3) containing "OK:VID_456.mp4"
+  static const int chunkedVideoComplete = 15;
 }
 
 class MediaPacket {
@@ -99,82 +118,312 @@ class MediaPacket {
 }
 
 class MediaSyncProtocol {
+  /// Get filename for an asset without loading the full file data
+  /// This is useful for checking sync history before expensive file operations
+  static Future<String> getAssetFilename(AssetEntity asset) async {
+    String filename = '';
+    String? filenameBase;
+    
+    // Try getting file and extracting filename
+    try {
+      final file = await asset.file;
+      if (file != null && file.path.isNotEmpty) {
+        // Extract just the filename from the path
+        final pathParts = file.path.split('/');
+        final filenamePart = pathParts.last;
+        // Extract base name without extension
+        if (filenamePart.isNotEmpty) {
+          final dotIndex = filenamePart.lastIndexOf('.');
+          if (dotIndex != -1) {
+            filenameBase = filenamePart.substring(0, dotIndex);
+          } else {
+            filenameBase = filenamePart;
+          }
+        }
+      }
+    } catch (e) {
+      print('Error accessing file for filename: $e');
+    }
+    
+    // If we got a filename base, we need to detect extension from a small sample
+    if (filenameBase != null && filenameBase.isNotEmpty) {
+      // Load only first 12 bytes for format detection
+      Uint8List? sampleBytes;
+      try {
+        final file = await asset.file;
+        if (file != null && file.existsSync()) {
+          final fileBytes = await file.readAsBytes();
+          sampleBytes = Uint8List.fromList(fileBytes.take(12).toList());
+        }
+      } catch (e) {
+        print('Failed to read file sample for extension detection: $e');
+      }
+      
+      if (sampleBytes == null || sampleBytes.isEmpty) {
+        final originBytes = await asset.originBytes;
+        if (originBytes != null && originBytes.isNotEmpty) {
+          sampleBytes = Uint8List.fromList(originBytes.take(12).toList());
+        }
+      }
+      
+      if (sampleBytes != null && sampleBytes.isNotEmpty) {
+        final detectedExtension = _detectImageExtension(sampleBytes, asset.type);
+        filename = '$filenameBase.$detectedExtension';
+      }
+    }
+    
+    // Fallback: Generate filename from asset ID if previous method failed
+    if (filename.isEmpty) {
+      final typePrefix = asset.type == AssetType.image ? 'IMG' : 'VID';
+      // Use a default extension based on type
+      final defaultExt = asset.type == AssetType.image ? 'jpg' : 'mp4';
+      filename = '${typePrefix}_${asset.id}.$defaultExt';
+    }
+    
+    return filename;
+  }
+
   /// Convert asset to packet - wrapper that handles isolate preparation
   static Future<PacketEnc> assetToPacket(AssetEntity asset) async {
     // First get the file path and prepare data for isolate
     final assetData = await prepareAssetData(asset);
-    // Process in isolate
-    return compute(processAssetInIsolate, assetData);
+    
+    // For videos, process in main isolate to avoid passing large data
+    // For images, use compute for better performance
+    if (asset.type == AssetType.video) {
+      return await _processVideoAsset(asset, assetData);
+    } else {
+      // Process images in isolate
+      return compute(processAssetInIsolate, assetData);
+    }
+  }
+  
+  /// Process video asset in main isolate with chunked upload for large files
+  /// Files over 50MB are sent in chunks to avoid memory issues
+  static Future<PacketEnc> _processVideoAsset(AssetEntity asset, AssetData assetData) async {
+    print('Processing video asset: ${assetData.id}');
+    
+    // This method now returns a dummy packet - actual upload is handled by sendVideoWithChunks
+    // Extract media type from filename extension
+    String mediaType = 'mp4';
+    final dotIndex = assetData.id.lastIndexOf('.');
+    if (dotIndex != -1 && dotIndex < assetData.id.length - 1) {
+      mediaType = assetData.id.substring(dotIndex + 1).toLowerCase();
+    }
+    
+    // Return a minimal packet with metadata - the actual sending is handled separately
+    final metadata = {
+      'id': assetData.id,
+      'media': mediaType,
+      'chunked': true, // Flag to indicate this needs chunked upload
+    };
+    final jsonStr = jsonEncode(metadata);
+    final jsonBytes = utf8.encode(jsonStr);
+    
+    return PacketEnc(MediaSyncPacketType.video, jsonBytes);
+  }
+  
+  /// Send video file using chunked upload for large files
+  /// This avoids loading the entire file into memory at once
+  static Future<bool> sendVideoWithChunks(
+    ServerConnection conn,
+    AssetEntity asset,
+    String fileId,
+    String mediaType, {
+    bool Function()? shouldCancel,
+    void Function(int current, int total)? onProgress,
+  }) async {
+    // Chunk size: 10MB per chunk (balance between memory and network efficiency)
+    const int chunkSize = 10 * 1024 * 1024; // 10MB
+    
+    // Get file handle
+    final file = await asset.file;
+    if (file == null || !file.existsSync()) {
+      print('Video file not found for chunked upload: $fileId');
+      return false;
+    }
+    
+    final fileSize = await file.length();
+    final totalChunks = (fileSize / chunkSize).ceil();
+    
+    print('Starting chunked upload for $fileId: ${(fileSize / (1024 * 1024)).toStringAsFixed(2)} MB in $totalChunks chunks');
+    
+    // Step 1: Send start packet
+    final startPacket = PacketEnc(
+      MediaSyncPacketType.chunkedVideoStart,
+      utf8.encode(jsonEncode({
+        'id': fileId,
+        'media': mediaType,
+        'totalSize': fileSize,
+        'chunkSize': chunkSize,
+        'totalChunks': totalChunks,
+      })),
+    );
+    
+    try {
+      final encoded = startPacket.encode();
+      await conn.sendData(encoded);
+      
+      // Wait for start acknowledgment
+      final startResponse = await _waitForResponse(conn, timeout: const Duration(seconds: 10), shouldCancel: shouldCancel);
+      final startResponseStr = utf8.decode(startResponse.data);
+      if (!startResponseStr.contains('OK:START')) {
+        print('Server did not acknowledge chunked upload start');
+        return false;
+      }
+      print('Server acknowledged chunked upload start');
+    } catch (e) {
+      print('Error sending chunked upload start: $e');
+      return false;
+    }
+    
+    // Step 2: Send chunks
+    final fileHandle = await file.open();
+    try {
+      for (int chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+        // Check for cancellation
+        if (shouldCancel != null && shouldCancel()) {
+          print('Chunked upload cancelled at chunk $chunkIndex');
+          await fileHandle.close();
+          return false;
+        }
+        
+        // Calculate chunk bounds
+        final startByte = chunkIndex * chunkSize;
+        final endByte = ((chunkIndex + 1) * chunkSize).clamp(0, fileSize);
+        final currentChunkSize = endByte - startByte;
+        
+        // Read chunk from file
+        await fileHandle.setPosition(startByte);
+        final chunkBytes = await fileHandle.read(currentChunkSize);
+        
+        // Encode chunk to base64
+        final base64Chunk = base64Encode(chunkBytes);
+        
+        // Create chunk packet
+        final chunkPacket = PacketEnc(
+          MediaSyncPacketType.chunkedVideoData,
+          utf8.encode(jsonEncode({
+            'id': fileId,
+            'chunkIndex': chunkIndex,
+            'data': base64Chunk,
+          })),
+        );
+        
+        print('Sending chunk $chunkIndex/${totalChunks - 1} (${(currentChunkSize / 1024).toStringAsFixed(1)} KB)');
+        
+        // Send chunk and wait for ACK
+        try {
+          final encodedChunk = chunkPacket.encode();
+          await conn.sendData(encodedChunk);
+          
+          // Calculate timeout based on chunk size (1.5s per MB)
+          final chunkSizeMB = currentChunkSize / (1024 * 1024);
+          final timeoutSeconds = (10 + chunkSizeMB * 1.5).ceil().clamp(10, 60);
+          final timeout = Duration(seconds: timeoutSeconds);
+          
+          final chunkResponse = await _waitForResponse(conn, timeout: timeout, shouldCancel: shouldCancel);
+          final chunkResponseStr = utf8.decode(chunkResponse.data);
+          if (!chunkResponseStr.contains('OK:CHUNK:$chunkIndex')) {
+            print('Server did not acknowledge chunk $chunkIndex');
+            await fileHandle.close();
+            return false;
+          }
+          
+          // Progress update
+          final progress = ((chunkIndex + 1) / totalChunks * 100).toStringAsFixed(1);
+          print('Chunk $chunkIndex ACK received - Progress: $progress%');
+          
+          // Notify progress callback
+          if (onProgress != null) {
+            onProgress(chunkIndex + 1, totalChunks);
+          }
+        } catch (e) {
+          print('Error sending chunk $chunkIndex: $e');
+          await fileHandle.close();
+          return false;
+        }
+        
+        // Small delay between chunks to allow GC
+        await Future.delayed(const Duration(milliseconds: 50));
+      }
+    } finally {
+      await fileHandle.close();
+    }
+    
+    // Step 3: Send complete packet
+    final completePacket = PacketEnc(
+      MediaSyncPacketType.chunkedVideoComplete,
+      utf8.encode(jsonEncode({
+        'id': fileId,
+        'totalChunks': totalChunks,
+      })),
+    );
+    
+    try {
+      final encoded = completePacket.encode();
+      await conn.sendData(encoded);
+      
+      // Wait for final acknowledgment
+      final completeResponse = await _waitForResponse(conn, timeout: const Duration(seconds: 30), shouldCancel: shouldCancel);
+      final completeResponseStr = utf8.decode(completeResponse.data);
+      if (completeResponse.type == MediaSyncPacketType.syncComplete && completeResponseStr.contains('OK:$fileId')) {
+        print('Chunked upload completed successfully for $fileId');
+        return true;
+      } else {
+        print('Server did not acknowledge chunked upload completion');
+        return false;
+      }
+    } catch (e) {
+      print('Error sending chunked upload complete: $e');
+      return false;
+    }
   }
 
   /// Prepare asset data for isolate
   static Future<AssetData> prepareAssetData(AssetEntity asset) async {
-    // On iOS, asset.file returns internal .bin paths that can't be read directly
-    // Use originBytes instead which works on both platforms
-    final bytes = await asset.originBytes;
-    if (bytes == null) {
+    Uint8List? bytes;
+    
+    if (asset.type == AssetType.video) {
+      // For videos, only load first 12 bytes for format detection to avoid OOM
+      // We'll load the full video later in a streaming fashion
+      try {
+        final file = await asset.file;
+        if (file != null && file.existsSync()) {
+          final fileBytes = await file.readAsBytes();
+          // Only keep first 12 bytes for format detection
+          bytes = Uint8List.fromList(fileBytes.take(12).toList());
+          print('Video format detection: loaded ${bytes.length} bytes from file');
+        }
+      } catch (e) {
+        print('Failed to read video file for format detection: $e');
+      }
+      
+      // Fallback: try originBytes but only take first 12 bytes
+      if (bytes == null || bytes.isEmpty) {
+        final originBytes = await asset.originBytes;
+        if (originBytes != null && originBytes.isNotEmpty) {
+          bytes = Uint8List.fromList(originBytes.take(12).toList());
+          print('Video format detection: loaded ${bytes.length} bytes from originBytes');
+        }
+      }
+    } else {
+      // For images, load full bytes (they're typically much smaller)
+      bytes = await asset.originBytes;
+    }
+    
+    if (bytes == null || bytes.isEmpty) {
       throw Exception('Could not get bytes for asset ${asset.id}');
     }
     
-    // Detect the actual file extension from bytes
-    final detectedExtension = _detectImageExtension(bytes, asset.type);
-    print('Detected extension from bytes: $detectedExtension for asset ${asset.id}');
+    // Use the centralized filename generation function
+    final filename = await getAssetFilename(asset);
+    print('Prepared filename for asset: $filename asset.type=${asset.type}');
     
-    // Get the filename with extension for proper file type identification
-    // On iOS, try multiple methods to get the proper filename
-    String filename = '';
-    String? filenameBase;
-    
-    // Try 1: Use title (original filename)
-    if (asset.title != null && asset.title!.isNotEmpty && !asset.title!.endsWith('.bin')) {
-      // Extract base name without extension
-      final dotIndex = asset.title!.lastIndexOf('.');
-      if (dotIndex != -1) {
-        filenameBase = asset.title!.substring(0, dotIndex);
-      } else {
-        filenameBase = asset.title!;
-      }
-      // Use detected extension
-      filename = '$filenameBase.$detectedExtension';
-    }
-    
-    print('Asset filename from title: $filename');
-    
-    // Try 2: If title is empty, try getting file and extracting filename
-    if (filename.isEmpty) {
-      try {
-        final file = await asset.file;
-        if (file != null && file.path.isNotEmpty) {
-          // Extract just the filename from the path
-          final pathParts = file.path.split('/');
-          final filenamePart = pathParts.last;
-          // Extract base name without extension (remove .bin or any other extension)
-          if (filenamePart.isNotEmpty) {
-            final dotIndex = filenamePart.lastIndexOf('.');
-            if (dotIndex != -1) {
-              filenameBase = filenamePart.substring(0, dotIndex);
-            } else {
-              filenameBase = filenamePart;
-            }
-            // Use detected extension
-            filename = '$filenameBase.$detectedExtension';
-          }
-        }
-      } catch (e) {
-        // File access failed, continue to next method
-        print('Error accessing file: $e');
-      }
-    }
-    
-    // Try 3: Generate filename from asset ID
-    if (filename.isEmpty) {
-      final typePrefix = asset.type == AssetType.image ? 'IMG' : 'VID';
-      filename = '${typePrefix}_${asset.id}.$detectedExtension';
-    }
-    
-    //add debug log here 
-    print('Prepared filename for asset  $filename asset.type=${asset.type}');
-    return AssetData(filename, filename, asset.type, bytes: bytes);
+    // For videos, don't pass the bytes to isolate (just filename info)
+    // For images, pass the full bytes
+    return AssetData(filename, filename, asset.type, 
+      bytes: asset.type == AssetType.image ? bytes : null);
   }
 
   /// Detect image/video extension from file bytes
@@ -240,25 +489,13 @@ class MediaSyncProtocol {
     return 'jpg';
   }
 
-  /// Check if filename already has a valid extension
-  static bool _hasValidExtension(String filename) {
-    const validExtensions = {
-      'jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp',
-      'mp4', 'mov', 'avi', 'wmv', '3gp', '3g2', 'mkv', 'webm', 'flv'
-    };
-    
-    final dotIndex = filename.lastIndexOf('.');
-    if (dotIndex == -1 || dotIndex >= filename.length - 1) {
-      return false;
+  /// Process asset in isolate - this is the isolate entry point (used for images only)
+  static Future<PacketEnc> processAssetInIsolate(AssetData data) async {
+    // This should only be called for images now
+    if (data.bytes == null) {
+      throw Exception('No bytes provided for asset ${data.id}');
     }
     
-    final extension = filename.substring(dotIndex + 1).toLowerCase();
-    return validExtensions.contains(extension);
-  }
-
-  /// Process asset in isolate - this is the isolate entry point
-  static Future<PacketEnc> processAssetInIsolate(AssetData data) async {
-    // Use the bytes directly (already loaded from originBytes)
     final bytes = data.bytes!;
     print('Processing asset: ${data.id}, bytes length: ${bytes.length}');
     // Convert to base64
@@ -282,7 +519,7 @@ class MediaSyncProtocol {
     final jsonBytes = utf8.encode(jsonStr);
     
     
-    // Create packet with appropriate type
+    // Create packet with appropriate type (should always be photo for this method)
     final packetType = data.type == AssetType.image 
         ? MediaSyncPacketType.photo 
         : MediaSyncPacketType.video;
@@ -291,7 +528,7 @@ class MediaSyncProtocol {
   }
 
   /// Send packet and wait for acknowledgment
-  static Future<bool> sendPacketWithAck(ServerConnection conn, PacketEnc packet, [String? fileId]) async {
+  static Future<bool> sendPacketWithAck(ServerConnection conn, PacketEnc packet, [String? fileId, bool Function()? shouldCancel]) async {
     // If fileId is not provided, extract it from the packet data
     String actualFileId = fileId ?? '';
     if (actualFileId.isEmpty) {
@@ -304,12 +541,24 @@ class MediaSyncProtocol {
       }
     }
     
+    // Calculate timeout based on packet size
+    // Assume upload speed of 1MB/s (conservative for mobile networks)
+    // Add base timeout of 10 seconds for processing
+    final packetSizeBytes = packet.data.length;
+    final packetSizeMB = packetSizeBytes / (1024 * 1024);
+    final baseTimeoutSeconds = 10;
+    final uploadTimeSeconds = (packetSizeMB * 1.5).ceil(); // 1.5s per MB to be conservative
+    final timeoutSeconds = baseTimeoutSeconds + uploadTimeSeconds;
+    final timeout = Duration(seconds: timeoutSeconds.clamp(10, 300)); // Min 10s, max 5 minutes
+    
+    print('Sending packet (${(packetSizeMB).toStringAsFixed(2)} MB), timeout: ${timeout.inSeconds}s');
+    
     final encoded = packet.encode();
     await conn.sendData(encoded);
 
-    // Wait for server response
+    // Wait for server response with calculated timeout and cancel support
     try {
-      final responsePacket = await _waitForResponse(conn);
+      final responsePacket = await _waitForResponse(conn, timeout: timeout, shouldCancel: shouldCancel);
       print('response msg $responsePacket');
       final responseStr = utf8.decode(responsePacket.data);
       // syncComplete is used as the ack type
@@ -326,7 +575,7 @@ class MediaSyncProtocol {
   }
 
   /// Wait for a response packet from the server
-  static Future<PacketEnc> _waitForResponse(ServerConnection conn) async {
+  static Future<PacketEnc> _waitForResponse(ServerConnection conn, {Duration timeout = const Duration(seconds: 10), bool Function()? shouldCancel}) async {
     final completer = Completer<PacketEnc>();
 
     // Buffer to accumulate incoming data
@@ -350,12 +599,33 @@ class MediaSyncProtocol {
       if (!completer.isCompleted) completer.completeError(error);
     });
 
-    // Add timeout
-    Future.delayed(const Duration(seconds: 10), () {
+    // Periodically check for cancel flag (every 100ms)
+    Timer? cancelCheckTimer;
+    if (shouldCancel != null) {
+      cancelCheckTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
+        if (shouldCancel()) {
+          timer.cancel();
+          subscription.cancel();
+          if (!completer.isCompleted) {
+            completer.completeError('Operation cancelled by user');
+          }
+        }
+      });
+    }
+
+    // Add timeout with configurable duration
+    Timer? timeoutTimer = Timer(timeout, () {
       if (!completer.isCompleted) {
         subscription.cancel();
-        completer.completeError('Timeout waiting for server response');
+        cancelCheckTimer?.cancel();
+        completer.completeError('Timeout waiting for server response after ${timeout.inSeconds}s');
       }
+    });
+
+    // Clean up timers when future completes
+    completer.future.whenComplete(() {
+      timeoutTimer.cancel();
+      cancelCheckTimer?.cancel();
     });
 
     return completer.future;
@@ -364,7 +634,7 @@ class MediaSyncProtocol {
   /// Send complete signal
   static Future<void> sendSyncComplete(ServerConnection conn) async {
     final packet = PacketEnc(MediaSyncPacketType.syncComplete, Uint8List(0));
-    await sendPacketWithAck(conn, packet, "sync_complete");
+    await sendPacketWithAck(conn, packet, "sync_complete", null); // No cancel check for sync complete
   }
 
   /// Send client sync start request

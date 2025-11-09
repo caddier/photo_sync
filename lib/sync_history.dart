@@ -170,6 +170,19 @@ class SyncHistory {
     }
   }
 
+  /// Check if any sync has occurred (i.e., if there are any records in sync_history)
+  Future<bool> hasSyncedBefore() async {
+    try {
+      final db = await database;
+      final result = await db.rawQuery('SELECT COUNT(*) as count FROM sync_history LIMIT 1');
+      final count = Sqflite.firstIntValue(result) ?? 0;
+      return count > 0;
+    } catch (e) {
+      print('Error checking sync history: $e');
+      return false;
+    }
+  }
+
   Future<void> close() async {
     final db = await database;
     await db.close();
