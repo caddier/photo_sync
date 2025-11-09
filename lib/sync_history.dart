@@ -74,15 +74,31 @@ class SyncHistory {
   }
 
   /// Check if a file has been synced
+  /// Matches by filename without extension since server may change thumbnail extensions
   Future<bool> isFileSynced(String fileId) async {
     final db = await database;
-    final result = await db.query(
+    
+    // First try exact match for backward compatibility
+    final exactResult = await db.query(
       'sync_history',
       where: 'file_id = ?',
       whereArgs: [fileId],
       limit: 1,
     );
-    return result.isNotEmpty;
+    if (exactResult.isNotEmpty) return true;
+    
+    // If no exact match, try matching by filename without extension
+    final filenameWithoutExt = _getFilenameWithoutExt(fileId);
+    final allRecords = await db.query('sync_history', columns: ['file_id']);
+    
+    for (final record in allRecords) {
+      final recordFileId = record['file_id'] as String;
+      if (_getFilenameWithoutExt(recordFileId) == filenameWithoutExt) {
+        return true;
+      }
+    }
+    
+    return false;
   }
 
   /// Record a successful sync
@@ -181,6 +197,114 @@ class SyncHistory {
       print('Error checking sync history: $e');
       return false;
     }
+  }
+
+  /// Sync database with server - remove records that don't exist on server
+  /// and optionally add records for files that exist on server but not in database
+  /// Note: Matches by filename without extension since server may change thumbnail extensions
+  Future<void> syncWithServer(List<String> serverFileIds) async {
+    try {
+      final db = await database;
+      
+      // Get all file IDs from local database
+      final localRecords = await db.query('sync_history', columns: ['file_id', 'file_type']);
+      final localFileIds = localRecords.map((record) => record['file_id'] as String).toList();
+      
+      // Server filenames already have no extensions - use them directly as a set
+      // Local filenames have extensions - we'll strip them when comparing
+      final serverFilenamesSet = serverFileIds.toSet();
+      
+      print('Sync DB: Server has ${serverFileIds.length} files');
+      print('Sync DB: Local DB has ${localFileIds.length} records');
+      
+      // Count by type
+      int localPhotos = 0;
+      int localVideos = 0;
+      for (var record in localRecords) {
+        final fileType = record['file_type'] as String?;
+        if (fileType == 'photo') localPhotos++;
+        if (fileType == 'video') localVideos++;
+      }
+      print('Sync DB: Local has $localPhotos photos, $localVideos videos');
+      
+      // Sample server files
+      final serverPhotos = serverFileIds.where((id) => id.contains('IMG_')).length;
+      final serverVideos = serverFileIds.where((id) => id.contains('VID_')).length;
+      print('Sync DB: Server has $serverPhotos IMG_ files, $serverVideos VID_ files');
+      
+      // Show sample server video files
+      final sampleServerVideos = serverFileIds.where((id) => id.contains('VID_')).take(3).toList();
+      if (sampleServerVideos.isNotEmpty) {
+        print('Sample server videos: ${sampleServerVideos.join(', ')}');
+      }
+      
+      // Show sample local video files
+      final localVideoRecords = localRecords.where((r) => r['file_type'] == 'video').take(3).toList();
+      if (localVideoRecords.isNotEmpty) {
+        final sampleLocalVideos = localVideoRecords.map((r) => r['file_id'] as String).toList();
+        print('Sample local videos: ${sampleLocalVideos.join(', ')}');
+        // Show what they look like without extension
+        final withoutExt = sampleLocalVideos.map((id) => _getFilenameWithoutExt(id)).join(', ');
+        print('Local videos without ext: $withoutExt');
+      }
+      
+      // Find records that exist in database but not on server (need to delete)
+      final toDelete = <String>[];
+      final matched = <String>[];
+      
+      for (final localFileId in localFileIds) {
+        final localFilenameWithoutExt = _getFilenameWithoutExt(localFileId);
+        // Server filenames already have no extension, compare directly
+        if (!serverFilenamesSet.contains(localFilenameWithoutExt)) {
+          toDelete.add(localFileId);
+        } else {
+          matched.add(localFileId);
+        }
+      }
+      
+      // Count matched files by type
+      int matchedPhotos = 0;
+      int matchedVideos = 0;
+      for (var record in localRecords) {
+        final fileId = record['file_id'] as String;
+        if (matched.contains(fileId)) {
+          final fileType = record['file_type'] as String?;
+          if (fileType == 'photo') matchedPhotos++;
+          if (fileType == 'video') matchedVideos++;
+        }
+      }
+      print('Sync DB: Matched $matchedPhotos photos, $matchedVideos videos');
+      
+      if (toDelete.isNotEmpty) {
+        print('Removing ${toDelete.length} records that no longer exist on server');
+        // Sample what's being deleted
+        final sampleDeletes = toDelete.take(5).join(', ');
+        print('Sample deletes: $sampleDeletes');
+        
+        for (final fileId in toDelete) {
+          await db.delete('sync_history', where: 'file_id = ?', whereArgs: [fileId]);
+        }
+      }
+      
+      print('Database sync complete: removed ${toDelete.length} orphaned records');
+    } catch (e) {
+      print('Error syncing database with server: $e');
+      rethrow;
+    }
+  }
+  
+  /// Extract filename without extension for matching
+  /// E.g., "IMG_123.jpg" -> "IMG_123", "VID_456.mp4" -> "VID_456"
+  String _getFilenameWithoutExt(String fileId) {
+    final lastDotIndex = fileId.lastIndexOf('.');
+    if (lastDotIndex == -1) return fileId;
+    return fileId.substring(0, lastDotIndex);
+  }
+
+  /// Remove a specific file from sync history
+  Future<void> removeFileRecord(String fileId) async {
+    final db = await database;
+    await db.delete('sync_history', where: 'file_id = ?', whereArgs: [fileId]);
   }
 
   Future<void> close() async {

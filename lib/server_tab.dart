@@ -197,6 +197,57 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _syncDatabaseWithServer() async {
+    if (_loading) return;
+
+    final server = widget.selectedServer;
+    if (server == null) {
+      _showMessage('Please select a server first');
+      return;
+    }
+
+    setState(() { _loading = true; });
+
+    try {
+      _showMessage('Syncing database with server...');
+      
+      // Get connection
+      final conn = await _ensureConnection();
+      
+      // Get all file IDs from server
+      final serverFileIds = await MediaSyncProtocol.getAllServerFileIds(conn);
+      
+      // Sync local database with server data
+      final history = SyncHistory();
+      await history.syncWithServer(serverFileIds);
+      
+      if (!mounted) return;
+      
+      _showMessage('Database synced: ${serverFileIds.length} files on server');
+      
+      // Refresh the gallery after sync
+      await _refreshGallery();
+    } catch (e) {
+      print('Error syncing database: $e');
+      if (!mounted) return;
+      _showMessage('Error syncing database: ${e.toString()}');
+    } finally {
+      if (mounted) {
+        setState(() { _loading = false; });
+      }
+    }
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   Widget _buildMediaWidget(ServerMediaItem item) {
     // If we have thumbData (base64), decode and display it
     if (item.thumbData != null && item.thumbData!.isNotEmpty) {
@@ -306,6 +357,18 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
                     style: ElevatedButton.styleFrom(
                       minimumSize: const Size(100, 32),
                       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton.icon(
+                    onPressed: _loading ? null : _syncDatabaseWithServer,
+                    icon: const Icon(Icons.sync, size: 18),
+                    label: const Text('Sync DB', style: TextStyle(fontSize: 14)),
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: const Size(100, 32),
+                      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+                      backgroundColor: Colors.orange.shade700,
+                      foregroundColor: Colors.white,
                     ),
                   ),
                 ],

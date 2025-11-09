@@ -42,9 +42,32 @@ class MainTabPage extends StatefulWidget {
   State<MainTabPage> createState() => _MainTabPageState();
 }
 
-class _MainTabPageState extends State<MainTabPage> {
+class _MainTabPageState extends State<MainTabPage> with SingleTickerProviderStateMixin {
   String? _selectedServerName;
   DeviceInfo? _selectedServer;
+  late TabController _tabController;
+  final GlobalKey<_SyncPageState> _syncPageKey = GlobalKey<_SyncPageState>();
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(_onTabChanged);
+  }
+
+  @override
+  void dispose() {
+    _tabController.removeListener(_onTabChanged);
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  void _onTabChanged() {
+    // When switching to the Sync tab (index 0), reload the synced counts
+    if (_tabController.index == 0) {
+      _syncPageKey.currentState?._loadSyncedCounts();
+    }
+  }
 
   void _updateServerName(String? serverName) {
     print('DEBUG: _updateServerName called with: $serverName');
@@ -77,83 +100,83 @@ class _MainTabPageState extends State<MainTabPage> {
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 3,
-      child: Scaffold(
-        appBar: AppBar(
-          title: _selectedServerName == null
-              ? const Text('Photo Sync')
-              : Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text('Photo Sync: '),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.cloud_queue,
-                            size: 16,
+    return Scaffold(
+      appBar: AppBar(
+        title: _selectedServerName == null
+            ? const Text('Photo Sync')
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Photo Sync: '),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.cloud_queue,
+                          size: 16,
+                          color: Colors.blue.shade300,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          '[ $_selectedServerName ]',
+                          style: TextStyle(
                             color: Colors.blue.shade300,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
                           ),
-                          const SizedBox(width: 6),
-                          Text(
-                            '[ $_selectedServerName ]',
-                            style: TextStyle(
-                              color: Colors.blue.shade300,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                            ),
-                          ),
-                          if (_selectedServer != null && _selectedServer!.ipAddress != null)
-                            Padding(
-                              padding: const EdgeInsets.only(left: 8),
-                              child: InkWell(
-                                onTap: () => _launchServerInBrowser(_selectedServer!.ipAddress!),
-                                child: Text(
-                                  '[${_selectedServer!.ipAddress!}]',
-                                  style: const TextStyle(
-                                    color: Colors.amberAccent,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 13,
-                                    decoration: TextDecoration.underline,
-                                  ),
+                        ),
+                        if (_selectedServer != null && _selectedServer!.ipAddress != null)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 8),
+                            child: InkWell(
+                              onTap: () => _launchServerInBrowser(_selectedServer!.ipAddress!),
+                              child: Text(
+                                '[${_selectedServer!.ipAddress!}]',
+                                style: const TextStyle(
+                                  color: Colors.amberAccent,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                  decoration: TextDecoration.underline,
                                 ),
                               ),
                             ),
-                        ],
-                      ),
+                          ),
+                      ],
                     ),
-                  ],
-                ),
-          centerTitle: false,
-          toolbarHeight: 70, // Increased height for better visibility
-          bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(36), // Reduce tab bar height
-            child: TabBar(
-              tabs: [
-                Tab(text: 'Sync', icon: Icon(Icons.sync)),
-                Tab(text: 'Server', icon: Icon(Icons.dns)),
-                Tab(text: 'Phone', icon: Icon(Icons.phone_android)),
-              ],
-            ),
+                  ),
+                ],
+              ),
+        centerTitle: false,
+        toolbarHeight: 70, // Increased height for better visibility
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(36), // Reduce tab bar height
+          child: TabBar(
+            controller: _tabController,
+            tabs: [
+              Tab(text: 'Sync', icon: Icon(Icons.sync)),
+              Tab(text: 'Server', icon: Icon(Icons.dns)),
+              Tab(text: 'Phone', icon: Icon(Icons.phone_android)),
+            ],
           ),
         ),
-        body: TabBarView(
-          children: [
-            SyncPage(
-              onServerSelected: _updateServerName,
-              onSelectedServerChanged: _onSelectedServerChanged,
-            ),
-            ServerTab(selectedServer: _selectedServer),
-            const PhoneTab(),
-          ],
-        ),
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          SyncPage(
+            key: _syncPageKey,
+            onServerSelected: _updateServerName,
+            onSelectedServerChanged: _onSelectedServerChanged,
+          ),
+          ServerTab(selectedServer: _selectedServer),
+          const PhoneTab(),
+        ],
       ),
     );
   }
@@ -584,9 +607,9 @@ class _SyncPageState extends State<SyncPage>
         _showErrorToast(context, 'Error syncing $assetType: ${e.toString()}');
       }
     } finally {
-      // Always send sync complete signal to server if we have a connection and created it
-      // This ensures the server generates thumbnails even if sync was cancelled
-      if (conn != null && createdConn) {
+      // Send sync complete signal to server if we have a connection and created it
+      // Skip if user cancelled to avoid waiting for timeout
+      if (conn != null && createdConn && !_cancelSync) {
         try {
           print('Sending sync complete signal to server ($assetType, createdConn=$createdConn)...');
           await MediaSyncProtocol.sendSyncComplete(conn);
@@ -594,8 +617,12 @@ class _SyncPageState extends State<SyncPage>
         } catch (e) {
           print('Error sending sync complete for $assetType: $e');
         }
-        
-        // Now close the connection we created
+      } else if (_cancelSync) {
+        print('Skipping sync complete signal (cancelled)');
+      }
+      
+      // Close the connection we created
+      if (conn != null && createdConn) {
         try {
           conn.disconnect();
           print('Connection closed for $assetType');
@@ -603,7 +630,7 @@ class _SyncPageState extends State<SyncPage>
           print('Error closing connection for $assetType: $e');
         }
       } else {
-        print('Skipping sync complete for $assetType (conn=$conn, createdConn=$createdConn)');
+        print('Skipping connection close for $assetType (conn=$conn, createdConn=$createdConn)');
       }
       // Clear active connection reference
       _activeConn = null;
@@ -773,12 +800,16 @@ class _SyncPageState extends State<SyncPage>
         await _syncAssets(RequestType.video, 'video', connection: conn);
       }
 
-      // Always send sync complete, even if cancelled, so server can generate thumbnails
-      try {
-        print('Sending sync complete signal to server (syncAll)...');
-        await MediaSyncProtocol.sendSyncComplete(conn);
-      } catch (e) {
-        print('Error sending sync complete: $e');
+      // Send sync complete if not cancelled
+      if (!_cancelSync) {
+        try {
+          print('Sending sync complete signal to server (syncAll)...');
+          await MediaSyncProtocol.sendSyncComplete(conn);
+        } catch (e) {
+          print('Error sending sync complete: $e');
+        }
+      } else {
+        print('Skipping sync complete signal (cancelled)');
       }
 
       // Close connection after done
@@ -805,12 +836,16 @@ class _SyncPageState extends State<SyncPage>
         await _syncAssets(RequestType.video, 'video', connection: conn);
       }
       
-      // Always send sync complete, even if cancelled, so server can generate thumbnails
-      try {
-        print('Sending sync complete signal to server (resumeSyncAll)...');
-        await MediaSyncProtocol.sendSyncComplete(conn);
-      } catch (e) {
-        print('Error sending sync complete: $e');
+      // Send sync complete if not cancelled
+      if (!_cancelSync) {
+        try {
+          print('Sending sync complete signal to server (resumeSyncAll)...');
+          await MediaSyncProtocol.sendSyncComplete(conn);
+        } catch (e) {
+          print('Error sending sync complete: $e');
+        }
+      } else {
+        print('Skipping sync complete signal (cancelled)');
       }
       
       try {

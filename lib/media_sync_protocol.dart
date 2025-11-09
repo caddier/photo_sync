@@ -747,6 +747,37 @@ class MediaSyncProtocol {
       return [];
     }
   }
+
+  /// Get all file IDs from server by fetching all pages
+  /// This is useful for syncing local database with server state
+  static Future<List<String>> getAllServerFileIds(ServerConnection conn) async {
+    try {
+      // First get total count
+      final totalCount = await getMediaCount(conn);
+      if (totalCount == 0) {
+        return [];
+      }
+
+      print('Fetching all server file IDs (total: $totalCount)...');
+      
+      // Fetch all pages with larger page size for efficiency
+      const pageSize = 100;
+      final totalPages = (totalCount / pageSize).ceil();
+      final allFileIds = <String>[];
+
+      for (int page = 0; page < totalPages; page++) {
+        print('Fetching page ${page + 1}/$totalPages...');
+        final thumbList = await getMediaThumbList(conn, page, pageSize);
+        allFileIds.addAll(thumbList.map((item) => item.id));
+      }
+
+      print('Retrieved ${allFileIds.length} file IDs from server');
+      return allFileIds;
+    } catch (e) {
+      print('Error getting all server file IDs: $e');
+      return [];
+    }
+  }
 }
 
 /// Data class for media thumbnail item
