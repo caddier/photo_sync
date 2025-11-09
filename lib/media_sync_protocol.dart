@@ -72,7 +72,50 @@ class MediaSyncProtocol {
     if (bytes == null) {
       throw Exception('Could not get bytes for asset ${asset.id}');
     }
-    return AssetData(asset.id, '', asset.mimeType, asset.type, bytes: bytes);
+    
+    // Get the filename with extension for proper file type identification
+    // On iOS, try multiple methods to get the proper filename
+    String filename = '';
+    
+    // Try 1: Use title (original filename)
+    if (asset.title != null && asset.title!.isNotEmpty) {
+      filename = asset.title!;
+    }
+    
+    // Try 2: If title is empty, try getting file and extracting filename
+    if (filename.isEmpty) {
+      try {
+        final file = await asset.file;
+        if (file != null && file.path.isNotEmpty) {
+          // Extract just the filename from the path
+          final pathParts = file.path.split('/');
+          final filenamePart = pathParts.last;
+          // On iOS, even if it's .bin, we can at least get the structure
+          if (filenamePart.isNotEmpty && !filenamePart.endsWith('.bin')) {
+            filename = filenamePart;
+          }
+        }
+      } catch (e) {
+        // File access failed, continue to next method
+      }
+    }
+    
+    // Try 3: Derive filename from mimeType and asset properties
+    if (filename.isEmpty) {
+      // Determine extension from mimeType or use default based on asset type
+      String extension;
+      if (asset.mimeType != null) {
+        extension = _extensionFromMime(asset.mimeType) ?? (asset.type == AssetType.image ? 'jpg' : 'mp4');
+      } else {
+        extension = asset.type == AssetType.image ? 'jpg' : 'mp4';
+      }
+      
+      // Use asset type and ID to make a meaningful name
+      final typePrefix = asset.type == AssetType.image ? 'IMG' : 'VID';
+      filename = '${typePrefix}_${asset.id}.$extension';
+    }
+    
+    return AssetData(asset.id, filename, asset.mimeType, asset.type, bytes: bytes);
   }
 
   /// Process asset in isolate - this is the isolate entry point
