@@ -149,7 +149,6 @@ class MediaSyncProtocol {
     if (filenameBase != null && filenameBase.isNotEmpty) {
       // Normalize by replacing / with _ (for asset IDs like IMG_1234/L0/001)
       filenameBase = filenameBase.replaceAll('/', '_');
-      print('[MediaSync] Normalized filename base: $filenameBase');
       
       // For videos, replace IMG prefix with VID if present
       if (asset.type == AssetType.video) {
@@ -198,10 +197,8 @@ class MediaSyncProtocol {
       // Normalize asset ID by replacing / with _
       final normalizedId = asset.id.replaceAll('/', '_');
       filename = '${typePrefix}_${normalizedId}.$defaultExt';
-      print('[MediaSync] Fallback filename (normalized): $filename');
     }
     
-    print('[MediaSync] Final filename: $filename');
     return filename;
   }
 

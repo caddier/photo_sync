@@ -130,28 +130,18 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
   }
 
   Future<void> _loadPhotoSyncedStatus() async {
-    print('[PhoneTab] Loading photo synced status for ${_displayedPhotos.length} displayed photos (page ${_currentPhotoPage + 1})');
-    
-    // Debug: dump all database records
-    final allDbRecords = await _history.getAllSyncedFileIds();
-    print('[PhoneTab] Database contains ${allDbRecords.length} synced records');
-    
     final syncedIds = <String>{};
     // Only check the currently displayed photos instead of all photos
     for (final a in _displayedPhotos) {
       // Get the filename for this asset (same way as sync process)
       final assetFilename = await MediaSyncProtocol.getAssetFilename(a);
       
-      print('[PhoneTab] Photo asset.id=${a.id}, filename=$assetFilename');
-      
       // Pass the full filename WITH extension (same as sync process)
       final isSynced = await _history.isFileSynced(assetFilename);
-      print('[PhoneTab] Photo $assetFilename synced: $isSynced');
       if (isSynced) {
         syncedIds.add(a.id);
       }
     }
-    print('[PhoneTab] Found ${syncedIds.length} synced photos on current page');
     if (!mounted) return;
     setState(() {
       // Only update the synced status for displayed photos, preserve others
@@ -162,28 +152,18 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
   }
 
   Future<void> _loadVideoSyncedStatus() async {
-    print('[PhoneTab] Loading video synced status for ${_displayedVideos.length} displayed videos (page ${_currentVideoPage + 1})');
-    
-    // Debug: dump all database records
-    final allDbRecords = await _history.getAllSyncedFileIds();
-    print('[PhoneTab] Database contains ${allDbRecords.length} synced records');
-    
     final syncedIds = <String>{};
     // Only check the currently displayed videos instead of all videos
     for (final a in _displayedVideos) {
       // Get the filename for this asset (same way as sync process)
       final assetFilename = await MediaSyncProtocol.getAssetFilename(a);
       
-      print('[PhoneTab] Video asset.id=${a.id}, filename=$assetFilename');
-      
       // Pass the full filename WITH extension (same as sync process)
       final isSynced = await _history.isFileSynced(assetFilename);
-      print('[PhoneTab] Video $assetFilename synced: $isSynced');
       if (isSynced) {
         syncedIds.add(a.id);
       }
     }
-    print('[PhoneTab] Found ${syncedIds.length} synced videos on current page');
     if (!mounted) return;
     setState(() {
       // Only update the synced status for displayed videos, preserve others

@@ -82,7 +82,6 @@ class SyncHistory {
     
     // Normalize the fileId by replacing / with _
     final normalizedFileId = fileId.replaceAll('/', '_');
-    print('[SyncHistory] Normalized fileId: $normalizedFileId');
     
     // First try exact match with normalized ID
     final exactResult = await db.query(
@@ -110,10 +109,8 @@ class SyncHistory {
     
     // If no exact match, try matching by filename without extension (normalized)
     final filenameWithoutExt = _getFilenameWithoutExt(normalizedFileId);
-    print('[SyncHistory] No exact match. Trying filename without ext: $filenameWithoutExt');
     
     final allRecords = await db.query('sync_history', columns: ['file_id']);
-    print('[SyncHistory] Total records in database: ${allRecords.length}');
     
     for (final record in allRecords) {
       final recordFileId = record['file_id'] as String;
@@ -123,8 +120,7 @@ class SyncHistory {
         return true;
       }
     }
-    
-    print('[SyncHistory] No match found for: $fileId (normalized: $normalizedFileId)');
+
     return false;
   }
 
@@ -134,7 +130,7 @@ class SyncHistory {
     final db = await database;
     // Normalize fileId by replacing / with _
     final normalizedFileId = fileId.replaceAll('/', '_');
-    print('[SyncHistory] Recording sync: $fileId -> $normalizedFileId');
+    print('[SyncHistory] Recording sync: $normalizedFileId');
     
     await db.insert(
       'sync_history',
