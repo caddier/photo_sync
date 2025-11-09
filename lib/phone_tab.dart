@@ -25,6 +25,7 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
   List<AssetEntity> _allPhotos = <AssetEntity>[];
   List<AssetEntity> _displayedPhotos = <AssetEntity>[];
   bool _loadingPhotos = false;
+  bool _loadingPhotoSyncStatus = false;
   int _currentPhotoPage = 0;
 
   // Video Data
@@ -36,6 +37,7 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
   List<AssetEntity> _allVideos = <AssetEntity>[];
   List<AssetEntity> _displayedVideos = <AssetEntity>[];
   bool _loadingVideos = false;
+  bool _loadingVideoSyncStatus = false;
   int _currentVideoPage = 0;
 
   @override
@@ -130,47 +132,65 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
   }
 
   Future<void> _loadPhotoSyncedStatus() async {
-    final syncedIds = <String>{};
-    // Only check the currently displayed photos instead of all photos
-    for (final a in _displayedPhotos) {
-      // Get the filename for this asset (same way as sync process)
-      final assetFilename = await MediaSyncProtocol.getAssetFilename(a);
-      
-      // Pass the full filename WITH extension (same as sync process)
-      final isSynced = await _history.isFileSynced(assetFilename);
-      if (isSynced) {
-        syncedIds.add(a.id);
+    if (_loadingPhotoSyncStatus) return;
+    setState(() => _loadingPhotoSyncStatus = true);
+    
+    try {
+      final syncedIds = <String>{};
+      // Only check the currently displayed photos instead of all photos
+      for (final a in _displayedPhotos) {
+        // Get the filename for this asset (same way as sync process)
+        final assetFilename = await MediaSyncProtocol.getAssetFilename(a);
+        
+        // Pass the full filename WITH extension (same as sync process)
+        final isSynced = await _history.isFileSynced(assetFilename);
+        if (isSynced) {
+          syncedIds.add(a.id);
+        }
       }
+      if (!mounted) return;
+      setState(() {
+        // Only update the synced status for displayed photos, preserve others
+        for (final id in syncedIds) {
+          _syncedPhotos.add(id);
+        }
+        _loadingPhotoSyncStatus = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loadingPhotoSyncStatus = false);
     }
-    if (!mounted) return;
-    setState(() {
-      // Only update the synced status for displayed photos, preserve others
-      for (final id in syncedIds) {
-        _syncedPhotos.add(id);
-      }
-    });
   }
 
   Future<void> _loadVideoSyncedStatus() async {
-    final syncedIds = <String>{};
-    // Only check the currently displayed videos instead of all videos
-    for (final a in _displayedVideos) {
-      // Get the filename for this asset (same way as sync process)
-      final assetFilename = await MediaSyncProtocol.getAssetFilename(a);
-      
-      // Pass the full filename WITH extension (same as sync process)
-      final isSynced = await _history.isFileSynced(assetFilename);
-      if (isSynced) {
-        syncedIds.add(a.id);
+    if (_loadingVideoSyncStatus) return;
+    setState(() => _loadingVideoSyncStatus = true);
+    
+    try {
+      final syncedIds = <String>{};
+      // Only check the currently displayed videos instead of all videos
+      for (final a in _displayedVideos) {
+        // Get the filename for this asset (same way as sync process)
+        final assetFilename = await MediaSyncProtocol.getAssetFilename(a);
+        
+        // Pass the full filename WITH extension (same as sync process)
+        final isSynced = await _history.isFileSynced(assetFilename);
+        if (isSynced) {
+          syncedIds.add(a.id);
+        }
       }
+      if (!mounted) return;
+      setState(() {
+        // Only update the synced status for displayed videos, preserve others
+        for (final id in syncedIds) {
+          _syncedVideos.add(id);
+        }
+        _loadingVideoSyncStatus = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loadingVideoSyncStatus = false);
     }
-    if (!mounted) return;
-    setState(() {
-      // Only update the synced status for displayed videos, preserve others
-      for (final id in syncedIds) {
-        _syncedVideos.add(id);
-      }
-    });
   }
 
   void _updateDisplayedPhotos() {
@@ -666,11 +686,22 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
   Widget build(BuildContext context) {
     return Column(
       children: [
-        TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Photos', icon: Icon(Icons.photo)),
-            Tab(text: 'Videos', icon: Icon(Icons.video_library)),
+        Stack(
+          alignment: Alignment.center,
+          children: [
+            TabBar(
+              controller: _tabController,
+              tabs: const [
+                Tab(text: 'Photos', icon: Icon(Icons.photo)),
+                Tab(text: 'Videos', icon: Icon(Icons.video_library)),
+              ],
+            ),
+            if (_loadingPhotoSyncStatus || _loadingVideoSyncStatus)
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
           ],
         ),
         Expanded(
