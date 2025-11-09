@@ -96,11 +96,18 @@ class _MainTabPageState extends State<MainTabPage> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          Icon(
+                            Icons.cloud_queue,
+                            size: 16,
+                            color: Colors.blue.shade300,
+                          ),
+                          const SizedBox(width: 6),
                           Text(
-                            _selectedServerName!,
-                            style: const TextStyle(
-                              color: Colors.lightGreenAccent,
+                            '[ $_selectedServerName ]',
+                            style: TextStyle(
+                              color: Colors.blue.shade300,
                               fontWeight: FontWeight.bold,
+                              fontSize: 13,
                             ),
                           ),
                           if (_selectedServer != null && _selectedServer!.ipAddress != null)
@@ -204,7 +211,6 @@ class _SyncPageState extends State<SyncPage>
     final savedName = await history.getDeviceName();
     if (savedName != null && savedName.isNotEmpty) {
       setState(() {
-        _deviceName = savedName;
         _deviceNameController.text = savedName;
       });
     } else {
@@ -212,7 +218,6 @@ class _SyncPageState extends State<SyncPage>
       try {
         final systemName = await DeviceManager.getLocalDeviceName();
         setState(() {
-          _deviceName = systemName;
           _deviceNameController.text = systemName;
         });
       } catch (e) {
@@ -227,9 +232,6 @@ class _SyncPageState extends State<SyncPage>
       return;
     }
     await history.saveDeviceName(name.trim());
-    setState(() {
-      _deviceName = name.trim();
-    });
   }
 
   @override
@@ -340,7 +342,6 @@ class _SyncPageState extends State<SyncPage>
   ServerConnection? _activeConn; // Currently active connection for sync (to force-cancel)
   
   // Device name state
-  String _deviceName = '';
   final TextEditingController _deviceNameController = TextEditingController();
 
   // simulate discovery
@@ -867,6 +868,10 @@ class _SyncPageState extends State<SyncPage>
                   elevation: 2,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
+                    side: BorderSide(
+                      color: Colors.green.shade400,
+                      width: 2,
+                    ),
                   ),
                   child: Padding(
                     padding: const EdgeInsets.all(8),
