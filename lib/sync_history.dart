@@ -32,6 +32,8 @@ class SyncHistory {
   // Cache for synced file IDs
   Set<String>? _syncedFileIdsCache;
   Set<String>? _syncedFileIdsWithoutExtCache;
+  int _syncedPhotoCount = 0;
+  int _syncedVideoCount = 0;
 
   Future<Database> get database async {
     if (_db != null) return _db!;
@@ -131,7 +133,7 @@ class SyncHistory {
   /// Load all synced file IDs into cache (call this once when phone tab loads)
   Future<void> loadSyncedFilesCache() async {
     final db = await database;
-    final records = await db.query('sync_history', columns: ['file_id']);
+    final records = await db.query('sync_history', columns: ['file_id', 'file_type']);
     
     _syncedFileIdsCache = records.map((r) => r['file_id'] as String).toSet();
     _syncedFileIdsWithoutExtCache = records.map((r) {
@@ -139,7 +141,20 @@ class SyncHistory {
       return _getFilenameWithoutExt(fileId);
     }).toSet();
     
-    print('[SyncHistory] Cache loaded: ${_syncedFileIdsCache!.length} files');
+    // Count photos and videos separately
+    _syncedPhotoCount = 0;
+    _syncedVideoCount = 0;
+    for (final record in records) {
+      final fileType = record['file_type'] as String?;
+      if (fileType == 'video') {
+        _syncedVideoCount++;
+      } else {
+        // Treat null or any other type as photo
+        _syncedPhotoCount++;
+      }
+    }
+    
+    print('[SyncHistory] Cache loaded: ${_syncedFileIdsCache!.length} files ($_syncedPhotoCount photos, $_syncedVideoCount videos)');
   }
 
   /// Check if a file is synced using cache (much faster than isFileSynced)
@@ -171,7 +186,27 @@ class SyncHistory {
   void clearCache() {
     _syncedFileIdsCache = null;
     _syncedFileIdsWithoutExtCache = null;
+    _syncedPhotoCount = 0;
+    _syncedVideoCount = 0;
     print('[SyncHistory] Cache cleared');
+  }
+
+  /// Get the total number of synced files from cache
+  /// Returns 0 if cache not loaded
+  int getSyncedFileCount() {
+    return _syncedFileIdsCache?.length ?? 0;
+  }
+
+  /// Get the number of synced photos from cache
+  /// Returns 0 if cache not loaded
+  int getSyncedPhotoCount() {
+    return _syncedPhotoCount;
+  }
+
+  /// Get the number of synced videos from cache
+  /// Returns 0 if cache not loaded
+  int getSyncedVideoCount() {
+    return _syncedVideoCount;
   }
 
   /// Record a successful sync

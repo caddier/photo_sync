@@ -143,6 +143,18 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
 
   Future<void> _loadPhotoSyncedStatus() async {
     if (_loadingPhotoSyncStatus) return;
+    
+    // Optimization: If we've already found all synced photos, skip checking
+    final totalSyncedPhotosInDb = _history.getSyncedPhotoCount();
+    if (totalSyncedPhotosInDb > 0 && _syncedPhotos.length >= totalSyncedPhotosInDb) {
+      // We've already found all synced items, no need to check more
+      // Ensure loading state is false
+      if (_loadingPhotoSyncStatus) {
+        setState(() => _loadingPhotoSyncStatus = false);
+      }
+      return;
+    }
+    
     setState(() => _loadingPhotoSyncStatus = true);
     
     try {
@@ -194,6 +206,18 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
 
   Future<void> _loadVideoSyncedStatus() async {
     if (_loadingVideoSyncStatus) return;
+    
+    // Optimization: If we've already found all synced videos, skip checking
+    final totalSyncedVideosInDb = _history.getSyncedVideoCount();
+    if (totalSyncedVideosInDb > 0 && _syncedVideos.length >= totalSyncedVideosInDb) {
+      // We've already found all synced items, no need to check more
+      // Ensure loading state is false
+      if (_loadingVideoSyncStatus) {
+        setState(() => _loadingVideoSyncStatus = false);
+      }
+      return;
+    }
+    
     setState(() => _loadingVideoSyncStatus = true);
     
     try {
@@ -412,6 +436,14 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
       _currentPhotoPage = index;
       _updateDisplayedPhotos();
     });
+    
+    // Check if we've already found all synced photos
+    final totalSyncedPhotosInDb = _history.getSyncedPhotoCount();
+    if (totalSyncedPhotosInDb > 0 && _syncedPhotos.length >= totalSyncedPhotosInDb) {
+      // Skip loading sync status - we've already found all synced items
+      return;
+    }
+    
     // Load sync status for the new page
     _loadPhotoSyncedStatus();
   }
@@ -421,6 +453,14 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
       _currentVideoPage = index;
       _updateDisplayedVideos();
     });
+    
+    // Check if we've already found all synced videos
+    final totalSyncedVideosInDb = _history.getSyncedVideoCount();
+    if (totalSyncedVideosInDb > 0 && _syncedVideos.length >= totalSyncedVideosInDb) {
+      // Skip loading sync status - we've already found all synced items
+      return;
+    }
+    
     // Load sync status for the new page
     _loadVideoSyncedStatus();
   }
