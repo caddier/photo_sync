@@ -115,6 +115,8 @@ class MediaSyncProtocol {
       filename = '${typePrefix}_${asset.id}.$extension';
     }
     
+    //add debug log here 
+    print('Prepared filename for asset ${asset.id}: $filename asset.mimeType=${asset.mimeType} asset.type=${asset.type}');
     return AssetData(asset.id, filename, asset.mimeType, asset.type, bytes: bytes);
   }
 
