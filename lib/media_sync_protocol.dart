@@ -147,6 +147,20 @@ class MediaSyncProtocol {
     
     // If we got a filename base, we need to detect extension from a small sample
     if (filenameBase != null && filenameBase.isNotEmpty) {
+      // For videos, replace IMG prefix with VID if present
+      if (asset.type == AssetType.video) {
+        // Check if filename contains IMG_ and replace with VID_
+        if (filenameBase.contains('IMG_')) {
+          filenameBase = filenameBase.replaceAll('IMG_', 'VID_');
+        } else if (filenameBase.toUpperCase().contains('IMG_')) {
+          // Handle case-insensitive replacement
+          filenameBase = filenameBase.replaceAllMapped(
+            RegExp(r'IMG_', caseSensitive: false),
+            (match) => 'VID_',
+          );
+        }
+      }
+      
       // Load only first 12 bytes for format detection
       Uint8List? sampleBytes;
       try {

@@ -497,13 +497,8 @@ class _SyncPageState extends State<SyncPage>
             // Step 2: Check if already synced BEFORE loading the file
             if (await history.isFileSynced(fileId)) {
               print('Asset $fileId already synced, skipping (file not loaded)');
-              setState(() {
-                if (type == RequestType.image) {
-                  syncedPhotos++;
-                } else {
-                  syncedVideos++;
-                }
-              });
+              // Reload count from database to ensure accuracy
+              await _loadSyncedCounts();
               continue;  // Skip already synced assets - saves memory!
             }
 
@@ -560,13 +555,8 @@ class _SyncPageState extends State<SyncPage>
             // Step 4: Record sync if successful
             if (success) {
               await history.recordSync(fileId, assetType);
-              setState(() {
-                if (type == RequestType.image) {
-                  syncedPhotos++;
-                } else {
-                  syncedVideos++;
-                }
-              });
+              // Reload count from database to ensure accuracy
+              await _loadSyncedCounts();
               print('Successfully synced $assetType $fileId');
             } else {
               print('Server failed to acknowledge $assetType $fileId');
@@ -716,12 +706,8 @@ class _SyncPageState extends State<SyncPage>
 
     try {
       await history.clearHistory();
-      await _loadSyncedCounts();
+      await _loadSyncedCounts();  // This will load from database (should be 0 after clear)
       await _checkDeviceNameLock();  // Unlock device name after clearing history
-      setState(() {
-        syncedPhotos = 0;
-        syncedVideos = 0;
-      });
       _showInfoToast(context, 'Sync history cleared — you can re-sync now.');
     } catch (e) {
       _showErrorToast(context, 'Failed to clear history: ${e.toString()}');
@@ -745,9 +731,8 @@ class _SyncPageState extends State<SyncPage>
       return;
     }
 
-    setState(() {
-      syncedPhotos = 0;  // Reset counter before starting
-    });
+    // Load current count from database before starting
+    await _loadSyncedCounts();
     await doSyncPhotos();
   }
 
@@ -760,9 +745,8 @@ class _SyncPageState extends State<SyncPage>
       return;
     }
 
-    setState(() {
-      syncedVideos = 0;  // Reset counter before starting
-    });
+    // Load current count from database before starting
+    await _loadSyncedCounts();
     await doSyncVideos();
   }
 
@@ -778,10 +762,8 @@ class _SyncPageState extends State<SyncPage>
       return;
     }
 
-    setState(() {
-      syncedPhotos = 0;
-      syncedVideos = 0;
-    });
+    // Load current count from database before starting
+    await _loadSyncedCounts();
 
     try {
       var conn = await doConnectSelectedServer();
@@ -812,6 +794,8 @@ class _SyncPageState extends State<SyncPage>
   // Resume logic for syncAll without resetting counters
   Future<void> _resumeSyncAll() async {
     if (!await _checkServerSelected()) return;
+    // Load current counts from database before resuming
+    await _loadSyncedCounts();
     try {
       var conn = await doConnectSelectedServer();
       if (syncedPhotos < totalPhotos) {
