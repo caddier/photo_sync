@@ -169,8 +169,13 @@ class MediaSyncProtocol {
       try {
         final file = await asset.file;
         if (file != null && file.existsSync()) {
-          final fileBytes = await file.readAsBytes();
-          sampleBytes = Uint8List.fromList(fileBytes.take(12).toList());
+          // Open file and read only first 12 bytes to avoid loading large files into memory
+          final fileHandle = await file.open();
+          try {
+            sampleBytes = await fileHandle.read(12);
+          } finally {
+            await fileHandle.close();
+          }
         }
       } catch (e) {
         print('Failed to read file sample for extension detection: $e');
