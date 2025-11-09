@@ -885,7 +885,7 @@ class _SyncPageState extends State<SyncPage>
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        "Device Name:",
+                        "My Phone Name:",
                         style: Theme.of(context).textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.bold,
                           color: Theme.of(context).primaryColor,
