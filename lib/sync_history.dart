@@ -41,7 +41,7 @@ class SyncHistory {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE sync_history (
@@ -51,6 +51,24 @@ class SyncHistory {
             synced_time TEXT  NULL
           )
         ''');
+        await db.execute('''
+          CREATE TABLE device_info (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_name TEXT NOT NULL,
+            updated_time TEXT NOT NULL
+          )
+        ''');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute('''
+            CREATE TABLE device_info (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              device_name TEXT NOT NULL,
+              updated_time TEXT NOT NULL
+            )
+          ''');
+        }
       },
     );
   }
@@ -120,6 +138,36 @@ class SyncHistory {
     final db = await database;
     final records = await db.query('sync_history');
     return records.map((record) => SyncRecord.fromMap(record)).toList();
+  }
+
+  /// Save device name
+  Future<void> saveDeviceName(String deviceName) async {
+    try {
+      final db = await database;
+      // Delete existing device name
+      await db.delete('device_info');
+      // Insert new device name
+      await db.insert('device_info', {
+        'device_name': deviceName,
+        'updated_time': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      print('Error saving device name to database: $e');
+      rethrow;
+    }
+  }
+
+  /// Get saved device name
+  Future<String?> getDeviceName() async {
+    try {
+      final db = await database;
+      final result = await db.query('device_info', limit: 1);
+      if (result.isEmpty) return null;
+      return result.first['device_name'] as String?;
+    } catch (e) {
+      print('Error getting device name from database: $e');
+      return null;
+    }
   }
 
   Future<void> close() async {

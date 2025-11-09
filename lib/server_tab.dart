@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:photo_sync/device_finder.dart';
 import 'package:photo_sync/server_conn.dart';
 import 'package:photo_sync/media_sync_protocol.dart';
+import 'package:photo_sync/sync_history.dart';
 
 class ServerTab extends StatefulWidget {
   final DeviceInfo? selectedServer;
@@ -45,16 +46,23 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
     // If connection exists and is connected, reuse it
     if (_connection != null) {
       // Check if connection is still alive (you may want to add a ping/check method)
+      print('ServerTab: Reusing existing connection');
       return _connection!;
     }
 
+    print('ServerTab: Creating new connection to ${server.ipAddress}:9922');
     // Create new connection
     _connection = ServerConnection(server.ipAddress ?? '', 9922);
     await _connection!.connect();
+    print('ServerTab: Connected successfully');
 
     // Send phone name (sync start) for new connections
+    // Get device name (will use saved name from database or fallback to system name)
     String phoneName = await DeviceManager.getLocalDeviceName();
+    
+    print('Sending sync start with device name: $phoneName');
     await MediaSyncProtocol.sendSyncStart(_connection!, phoneName);
+    print('ServerTab: Sync start sent successfully');
 
     return _connection!;
   }
@@ -83,11 +91,14 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
         return;
       }
 
+      print('ServerTab: Connecting to server ${server.deviceName}...');
       // Get or create connection
       final conn = await _ensureConnection();
+      print('ServerTab: Connection established, requesting media count...');
 
       // 2. Request media count
       final count = await MediaSyncProtocol.getMediaCount(conn);
+      print('ServerTab: Received media count: $count');
 
       if (!mounted) return;
       
@@ -98,11 +109,13 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
 
       // 3. Request media thumbnail list for the first page
       if (count > 0) {
+        print('ServerTab: Requesting thumbnail list for page 0...');
         final thumbList = await MediaSyncProtocol.getMediaThumbList(
           conn, 
           0, // page index 0 (first page)
           _itemsPerPage
         );
+        print('ServerTab: Received ${thumbList.length} thumbnails');
 
         if (!mounted) return;
         

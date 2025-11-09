@@ -8,13 +8,12 @@ import 'package:photo_sync/server_conn.dart';
 
 // Data class for passing asset info to isolate
 class AssetData {
-  final String id;
+  final String id; // filename will be used as id
   final String path;
-  final String? mimeType;
   final AssetType type;
   final Uint8List? bytes; // Add bytes field for iOS compatibility
 
-  AssetData(this.id, this.path, this.mimeType, this.type, {this.bytes});
+  AssetData(this.id, this.path, this.type, {this.bytes});
 }
 
 // Packet types for media sync
@@ -73,14 +72,29 @@ class MediaSyncProtocol {
       throw Exception('Could not get bytes for asset ${asset.id}');
     }
     
+    // Detect the actual file extension from bytes
+    final detectedExtension = _detectImageExtension(bytes, asset.type);
+    print('Detected extension from bytes: $detectedExtension for asset ${asset.id}');
+    
     // Get the filename with extension for proper file type identification
     // On iOS, try multiple methods to get the proper filename
     String filename = '';
+    String? filenameBase;
     
     // Try 1: Use title (original filename)
-    if (asset.title != null && asset.title!.isNotEmpty) {
-      filename = asset.title!;
+    if (asset.title != null && asset.title!.isNotEmpty && !asset.title!.endsWith('.bin')) {
+      // Extract base name without extension
+      final dotIndex = asset.title!.lastIndexOf('.');
+      if (dotIndex != -1) {
+        filenameBase = asset.title!.substring(0, dotIndex);
+      } else {
+        filenameBase = asset.title!;
+      }
+      // Use detected extension
+      filename = '$filenameBase.$detectedExtension';
     }
+    
+    print('Asset filename from title: $filename');
     
     // Try 2: If title is empty, try getting file and extracting filename
     if (filename.isEmpty) {
@@ -90,34 +104,112 @@ class MediaSyncProtocol {
           // Extract just the filename from the path
           final pathParts = file.path.split('/');
           final filenamePart = pathParts.last;
-          // On iOS, even if it's .bin, we can at least get the structure
-          if (filenamePart.isNotEmpty && !filenamePart.endsWith('.bin')) {
-            filename = filenamePart;
+          // Extract base name without extension (remove .bin or any other extension)
+          if (filenamePart.isNotEmpty) {
+            final dotIndex = filenamePart.lastIndexOf('.');
+            if (dotIndex != -1) {
+              filenameBase = filenamePart.substring(0, dotIndex);
+            } else {
+              filenameBase = filenamePart;
+            }
+            // Use detected extension
+            filename = '$filenameBase.$detectedExtension';
           }
         }
       } catch (e) {
         // File access failed, continue to next method
+        print('Error accessing file: $e');
       }
     }
     
-    // Try 3: Derive filename from mimeType and asset properties
+    // Try 3: Generate filename from asset ID
     if (filename.isEmpty) {
-      // Determine extension from mimeType or use default based on asset type
-      String extension;
-      if (asset.mimeType != null) {
-        extension = _extensionFromMime(asset.mimeType) ?? (asset.type == AssetType.image ? 'jpg' : 'mp4');
-      } else {
-        extension = asset.type == AssetType.image ? 'jpg' : 'mp4';
-      }
-      
-      // Use asset type and ID to make a meaningful name
       final typePrefix = asset.type == AssetType.image ? 'IMG' : 'VID';
-      filename = '${typePrefix}_${asset.id}.$extension';
+      filename = '${typePrefix}_${asset.id}.$detectedExtension';
     }
     
     //add debug log here 
-    print('Prepared filename for asset ${asset.id}: $filename asset.mimeType=${asset.mimeType} asset.type=${asset.type}');
-    return AssetData(asset.id, filename, asset.mimeType, asset.type, bytes: bytes);
+    print('Prepared filename for asset  $filename asset.type=${asset.type}');
+    return AssetData(filename, filename, asset.type, bytes: bytes);
+  }
+
+  /// Detect image/video extension from file bytes
+  static String _detectImageExtension(Uint8List bytes, AssetType type) {
+    if (type == AssetType.video) {
+      // Check video signatures
+      if (bytes.length >= 12) {
+        // MP4/MOV (ftyp box)
+        if (bytes[4] == 0x66 && bytes[5] == 0x74 && bytes[6] == 0x79 && bytes[7] == 0x70) {
+          // Check specific brand
+          final brand = String.fromCharCodes(bytes.sublist(8, 12));
+          if (brand.startsWith('qt') || brand.startsWith('mov')) {
+            return 'mov';
+          }
+          return 'mp4';
+        }
+      }
+      return 'mp4'; // default for videos
+    }
+    
+    // Check image signatures
+    if (bytes.length >= 12) {
+      // JPEG (FF D8 FF)
+      if (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) {
+        return 'jpg';
+      }
+      
+      // PNG (89 50 4E 47)
+      if (bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) {
+        return 'png';
+      }
+      
+      // GIF (47 49 46 38)
+      if (bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x38) {
+        return 'gif';
+      }
+      
+      // WebP (RIFF ... WEBP)
+      if (bytes.length >= 12 &&
+          bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46 &&
+          bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50) {
+        return 'webp';
+      }
+      
+      // HEIC/HEIF (ftyp box with heic/mif1/msf1 brand)
+      if (bytes.length >= 12 &&
+          bytes[4] == 0x66 && bytes[5] == 0x74 && bytes[6] == 0x79 && bytes[7] == 0x70) {
+        final brand = String.fromCharCodes(bytes.sublist(8, 12));
+        if (brand == 'heic' || brand == 'heix' || brand == 'hevc' || 
+            brand == 'heim' || brand == 'heis' || brand == 'hevm' ||
+            brand == 'mif1' || brand == 'msf1') {
+          return 'heic';
+        }
+      }
+      
+      // BMP (42 4D)
+      if (bytes[0] == 0x42 && bytes[1] == 0x4D) {
+        return 'bmp';
+      }
+    }
+    
+    // Default fallback
+    return 'jpg';
+  }
+
+  /// Check if filename already has a valid extension
+  static bool _hasValidExtension(String filename) {
+    const validExtensions = {
+      'jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp',
+      'mp4', 'mov', 'avi', 'wmv', '3gp', '3g2', 'mkv', 'webm', 'flv'
+    };
+    
+    final dotIndex = filename.lastIndexOf('.');
+    if (dotIndex == -1 || dotIndex >= filename.length - 1) {
+      return false;
+    }
+    
+    final extension = filename.substring(dotIndex + 1).toLowerCase();
+    return validExtensions.contains(extension);
   }
 
   /// Process asset in isolate - this is the isolate entry point
@@ -128,9 +220,12 @@ class MediaSyncProtocol {
     // Convert to base64
     final base64Data = base64Encode(bytes);
     
-
-    // Determine media type (extension) from mimeType when available
-    String mediaType = _extensionFromMime(data.mimeType) ?? 'bin';
+    // Extract media type from filename extension
+    String mediaType = 'bin';
+    final dotIndex = data.id.lastIndexOf('.');
+    if (dotIndex != -1 && dotIndex < data.id.length - 1) {
+      mediaType = data.id.substring(dotIndex + 1).toLowerCase();
+    }
 
     // Create media packet
     final mediaPacket = MediaPacket(data.id, base64Data, mediaType);
@@ -152,7 +247,19 @@ class MediaSyncProtocol {
   }
 
   /// Send packet and wait for acknowledgment
-  static Future<bool> sendPacketWithAck(ServerConnection conn, PacketEnc packet, String fileId) async {
+  static Future<bool> sendPacketWithAck(ServerConnection conn, PacketEnc packet, [String? fileId]) async {
+    // If fileId is not provided, extract it from the packet data
+    String actualFileId = fileId ?? '';
+    if (actualFileId.isEmpty) {
+      try {
+        final jsonStr = utf8.decode(packet.data);
+        final jsonData = jsonDecode(jsonStr) as Map<String, dynamic>;
+        actualFileId = jsonData['id'] as String? ?? '';
+      } catch (e) {
+        print('Failed to extract fileId from packet: $e');
+      }
+    }
+    
     final encoded = packet.encode();
     await conn.sendData(encoded);
 
@@ -162,7 +269,7 @@ class MediaSyncProtocol {
       print('response msg $responsePacket');
       final responseStr = utf8.decode(responsePacket.data);
       // syncComplete is used as the ack type
-      if (responsePacket.type == MediaSyncPacketType.syncComplete && responseStr.contains('OK:$fileId')) {
+      if (responsePacket.type == MediaSyncPacketType.syncComplete && responseStr.contains('OK:$actualFileId')) {
         // Sync complete ack
         return true;
       }
@@ -353,33 +460,4 @@ class MediaThumbItem {
     const videoTypes = {'mp4', 'mov', 'avi', 'wmv', '3gp', '3g2', 'mkv', 'webm', 'flv', 'video'};
     return videoTypes.contains(media.toLowerCase());
   }
-}
-
-// Helper: derive a short file extension-like media string from a mime type
-String? _extensionFromMime(String? mime) {
-  if (mime == null) return null;
-  // mime may include parameters like 'image/jpeg; charset=UTF-8'
-  final primary = mime.split(';').first.trim();
-  final parts = primary.split('/');
-  if (parts.length != 2) return null;
-  var subtype = parts[1].toLowerCase();
-
-  // common mappings
-  const mapping = {
-    'jpeg': 'jpg',
-    'jpg': 'jpg',
-    'png': 'png',
-    'webp': 'webp',
-    'mp4': 'mp4',
-    'quicktime': 'mov',
-    'x-msvideo': 'avi',
-    'x-ms-wmv': 'wmv',
-    'gif': 'gif',
-    'heic': 'heic',
-    'heif': 'heif',
-    '3gpp': '3gp',
-    '3gpp2': '3g2',
-  };
-
-  return mapping[subtype] ?? subtype;
 }

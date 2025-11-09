@@ -190,12 +190,46 @@ class _SyncPageState extends State<SyncPage>
     WidgetsBinding.instance.addObserver(this);
     _loadMediaCounts();
     _loadSyncedCounts();
+    _loadDeviceName();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _deviceNameController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadDeviceName() async {
+    final savedName = await history.getDeviceName();
+    if (savedName != null && savedName.isNotEmpty) {
+      setState(() {
+        _deviceName = savedName;
+        _deviceNameController.text = savedName;
+      });
+    } else {
+      // Try to get device name from system as default
+      try {
+        final systemName = await DeviceManager.getLocalDeviceName();
+        setState(() {
+          _deviceName = systemName;
+          _deviceNameController.text = systemName;
+        });
+      } catch (e) {
+        print('Failed to get system device name: $e');
+      }
+    }
+  }
+
+  Future<void> _saveDeviceName(String name) async {
+    if (name.trim().isEmpty) {
+      _showErrorToast(context, 'Device name cannot be empty');
+      return;
+    }
+    await history.saveDeviceName(name.trim());
+    setState(() {
+      _deviceName = name.trim();
+    });
   }
 
   @override
@@ -205,11 +239,14 @@ class _SyncPageState extends State<SyncPage>
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached) {
       if (_isSyncing) {
-        _resumeOnForeground = true;
+        // Only mark for resume if user didn't manually cancel
+        if (!_userCancelled) {
+          _resumeOnForeground = true;
+        }
         _cancelSync = true;
       }
     } else if (state == AppLifecycleState.resumed) {
-      if (_resumeOnForeground && !_isSyncing) {
+      if (_resumeOnForeground && !_isSyncing && !_userCancelled) {
         _resumeOnForeground = false;
         Future.microtask(() async {
           if (!mounted) return;
@@ -299,7 +336,12 @@ class _SyncPageState extends State<SyncPage>
   bool _isSyncing = false;
   String? _syncStatus;
   bool _cancelSync = false;  // Flag to cancel ongoing sync
+  bool _userCancelled = false;  // Flag to track user-initiated cancellation
   ServerConnection? _activeConn; // Currently active connection for sync (to force-cancel)
+  
+  // Device name state
+  String _deviceName = '';
+  final TextEditingController _deviceNameController = TextEditingController();
 
   // simulate discovery
   Future<void> discoverServers() async {
@@ -359,8 +401,10 @@ class _SyncPageState extends State<SyncPage>
 
   ServerConnection conn = ServerConnection(selectedServer!.ipAddress ?? '', 9922);
   await conn.connect();
-  // Await the async device name getter
+  
+  // Get device name (will use saved name from database or fallback to system name)
   String phoneName = await DeviceManager.getLocalDeviceName();
+  
   await MediaSyncProtocol.sendSyncStart(conn, phoneName);
   return conn;
   }
@@ -369,6 +413,11 @@ class _SyncPageState extends State<SyncPage>
   final int _chunkSize = 5;  // Process assets in small batches
 
   Future<void> _syncAssets(RequestType type, String assetType, {ServerConnection? connection}) async {
+    // Don't start a new sync if cancel was requested or user cancelled
+    if (_cancelSync || _userCancelled) {
+      return;
+    }
+    
     ServerConnection? conn = connection;
     var createdConn = false;
     try {
@@ -432,7 +481,7 @@ class _SyncPageState extends State<SyncPage>
             final packet = await MediaSyncProtocol.assetToPacket(asset);
             if (_cancelSync) break;
 
-            final success = await MediaSyncProtocol.sendPacketWithAck(conn, packet, asset.id);
+            final success = await MediaSyncProtocol.sendPacketWithAck(conn, packet);
             if (_cancelSync) break;
             
             // Only record if server acknowledged
@@ -465,8 +514,17 @@ class _SyncPageState extends State<SyncPage>
         _showErrorToast(context, 'Error syncing $assetType: ${e.toString()}');
       }
     } finally {
-      // Clean up: only close connection if we created it here
+      // Always send sync complete signal to server if we created the connection
+      // This ensures the server generates thumbnails even if sync was cancelled
       if (createdConn && conn != null) {
+        try {
+          print('Sending sync complete signal to server...');
+          await MediaSyncProtocol.sendSyncComplete(conn);
+        } catch (e) {
+          print('Error sending sync complete: $e');
+        }
+        
+        // Now close the connection
         try {
           conn.disconnect();
         } catch (e) {
@@ -481,18 +539,24 @@ class _SyncPageState extends State<SyncPage>
         setState(() {
           _isSyncing = false;
           _syncStatus = null;
-          _cancelSync = false;  // Reset cancel flag
+          if (!_userCancelled) {
+            _cancelSync = false;  // Only reset cancel flag if not user-cancelled
+          }
         });
       }
     }
   }
 
   Future<void> doSyncPhotos() async {
+    _userCancelled = false;  // Reset user cancel flag when starting new sync
+    _cancelSync = false;  // Reset cancel flag when starting new sync
     _activeSyncMode = SyncMode.photos;
     await _syncAssets(RequestType.image, 'photo');
   }  
   
   Future<void> doSyncVideos() async {
+    _userCancelled = false;  // Reset user cancel flag when starting new sync
+    _cancelSync = false;  // Reset cancel flag when starting new sync
     _activeSyncMode = SyncMode.videos;
     await _syncAssets(RequestType.video, 'video');
   }
@@ -616,6 +680,8 @@ class _SyncPageState extends State<SyncPage>
   }
 
   Future<void> syncAll() async {
+    _userCancelled = false;  // Reset user cancel flag when starting new sync
+    _cancelSync = false;  // Reset cancel flag when starting new sync
     _activeSyncMode = SyncMode.all;
     if (!await _checkServerSelected()) return;
 
@@ -638,8 +704,12 @@ class _SyncPageState extends State<SyncPage>
         await _syncAssets(RequestType.video, 'video', connection: conn);
       }
 
-      if (!_cancelSync) {
+      // Always send sync complete, even if cancelled, so server can generate thumbnails
+      try {
+        print('Sending sync complete signal to server (syncAll)...');
         await MediaSyncProtocol.sendSyncComplete(conn);
+      } catch (e) {
+        print('Error sending sync complete: $e');
       }
 
       // Close connection after done
@@ -663,9 +733,15 @@ class _SyncPageState extends State<SyncPage>
       if (!_cancelSync && syncedVideos < totalVideos) {
         await _syncAssets(RequestType.video, 'video', connection: conn);
       }
-      if (!_cancelSync) {
+      
+      // Always send sync complete, even if cancelled, so server can generate thumbnails
+      try {
+        print('Sending sync complete signal to server (resumeSyncAll)...');
         await MediaSyncProtocol.sendSyncComplete(conn);
+      } catch (e) {
+        print('Error sending sync complete: $e');
       }
+      
       try {
         conn.disconnect();
       } catch (_) {}
@@ -686,6 +762,74 @@ class _SyncPageState extends State<SyncPage>
         child: Column(
           children: [
             const SizedBox(height: 12),
+            Card(
+                margin: const EdgeInsets.symmetric(horizontal: 8),
+                elevation: 2,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.phone_android,
+                            size: 18,
+                            color: Theme.of(context).primaryColor,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            "Device Name",
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: Theme.of(context).primaryColor,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _deviceNameController,
+                              decoration: InputDecoration(
+                                hintText: 'Enter device name',
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                isDense: true,
+                              ),
+                              style: const TextStyle(fontSize: 14),
+                              onSubmitted: _saveDeviceName,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          ElevatedButton(
+                            onPressed: () => _saveDeviceName(_deviceNameController.text),
+                            style: ElevatedButton.styleFrom(
+                              minimumSize: const Size(60, 36),
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            child: const Text("Save", style: TextStyle(fontSize: 14)),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            const SizedBox(height: 6),
             Card(
                 margin: const EdgeInsets.symmetric(horizontal: 8),
                 elevation: 2,
@@ -912,6 +1056,7 @@ class _SyncPageState extends State<SyncPage>
                                     onPressed: () {
                                       setState(() {
                                         _cancelSync = true;
+                                        _userCancelled = true;  // Mark as user-initiated cancel
                                         _syncStatus = 'Cancelling sync...';
                                       });
                                       // Force-close any active connection to immediately unblock pending I/O

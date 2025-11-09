@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:async';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:photo_sync/sync_history.dart';
 
 //server suppose to listen on TCP Port 9922 for incoming connections
 //server also need to listen on udp port 7799 for discovery requests
@@ -201,6 +202,18 @@ static String calculateBroadcastAddress(String ip, String mask) {
   }
 
   static Future<String> getLocalDeviceName() async {
+    // First try to get saved device name from database
+    try {
+      final history = SyncHistory();
+      final savedName = await history.getDeviceName();
+      if (savedName != null && savedName.isNotEmpty) {
+        return savedName;
+      }
+    } catch (e) {
+      print('Error getting device name from database: $e');
+    }
+    
+    // Fallback to system device name
     final deviceInfo = DeviceInfoPlugin();
     if (Platform.isAndroid) {
       final androidInfo = await deviceInfo.androidInfo;
