@@ -147,6 +147,10 @@ class MediaSyncProtocol {
     
     // If we got a filename base, we need to detect extension from a small sample
     if (filenameBase != null && filenameBase.isNotEmpty) {
+      // Normalize by replacing / with _ (for asset IDs like IMG_1234/L0/001)
+      filenameBase = filenameBase.replaceAll('/', '_');
+      print('[MediaSync] Normalized filename base: $filenameBase');
+      
       // For videos, replace IMG prefix with VID if present
       if (asset.type == AssetType.video) {
         // Check if filename contains IMG_ and replace with VID_
@@ -191,9 +195,13 @@ class MediaSyncProtocol {
       final typePrefix = asset.type == AssetType.image ? 'IMG' : 'VID';
       // Use a default extension based on type
       final defaultExt = asset.type == AssetType.image ? 'jpg' : 'mp4';
-      filename = '${typePrefix}_${asset.id}.$defaultExt';
+      // Normalize asset ID by replacing / with _
+      final normalizedId = asset.id.replaceAll('/', '_');
+      filename = '${typePrefix}_${normalizedId}.$defaultExt';
+      print('[MediaSync] Fallback filename (normalized): $filename');
     }
     
+    print('[MediaSync] Final filename: $filename');
     return filename;
   }
 

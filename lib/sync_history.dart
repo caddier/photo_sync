@@ -75,39 +75,71 @@ class SyncHistory {
 
   /// Check if a file has been synced
   /// Matches by filename without extension since server may change thumbnail extensions
+  /// Also normalizes / to _ since file paths may contain /L0/001 but DB stores with _
   Future<bool> isFileSynced(String fileId) async {
     final db = await database;
     
-    // First try exact match for backward compatibility
+    
+    // Normalize the fileId by replacing / with _
+    final normalizedFileId = fileId.replaceAll('/', '_');
+    print('[SyncHistory] Normalized fileId: $normalizedFileId');
+    
+    // First try exact match with normalized ID
     final exactResult = await db.query(
+      'sync_history',
+      where: 'file_id = ?',
+      whereArgs: [normalizedFileId],
+      limit: 1,
+    );
+    if (exactResult.isNotEmpty) {
+      print('[SyncHistory] Exact match found for normalized: $normalizedFileId');
+      return true;
+    }
+    
+    // Also try original fileId for backward compatibility
+    final exactResultOriginal = await db.query(
       'sync_history',
       where: 'file_id = ?',
       whereArgs: [fileId],
       limit: 1,
     );
-    if (exactResult.isNotEmpty) return true;
+    if (exactResultOriginal.isNotEmpty) {
+      print('[SyncHistory] Exact match found for original: $fileId');
+      return true;
+    }
     
-    // If no exact match, try matching by filename without extension
-    final filenameWithoutExt = _getFilenameWithoutExt(fileId);
+    // If no exact match, try matching by filename without extension (normalized)
+    final filenameWithoutExt = _getFilenameWithoutExt(normalizedFileId);
+    print('[SyncHistory] No exact match. Trying filename without ext: $filenameWithoutExt');
+    
     final allRecords = await db.query('sync_history', columns: ['file_id']);
+    print('[SyncHistory] Total records in database: ${allRecords.length}');
     
     for (final record in allRecords) {
       final recordFileId = record['file_id'] as String;
-      if (_getFilenameWithoutExt(recordFileId) == filenameWithoutExt) {
+      final recordFilenameWithoutExt = _getFilenameWithoutExt(recordFileId);
+      if (recordFilenameWithoutExt == filenameWithoutExt) {
+        print('[SyncHistory] Match found! $normalizedFileId matches DB record $recordFileId');
         return true;
       }
     }
     
+    print('[SyncHistory] No match found for: $fileId (normalized: $normalizedFileId)');
     return false;
   }
 
   /// Record a successful sync
+  /// Normalizes fileId by replacing / with _ for consistency
   Future<void> recordSync(String fileId, String fileType) async {
     final db = await database;
+    // Normalize fileId by replacing / with _
+    final normalizedFileId = fileId.replaceAll('/', '_');
+    print('[SyncHistory] Recording sync: $fileId -> $normalizedFileId');
+    
     await db.insert(
       'sync_history',
       {
-        'file_id': fileId,
+        'file_id': normalizedFileId,
         'file_type': fileType,
         'synced_time': DateTime.now().toIso8601String(),
       },
@@ -297,8 +329,19 @@ class SyncHistory {
   /// E.g., "IMG_123.jpg" -> "IMG_123", "VID_456.mp4" -> "VID_456"
   String _getFilenameWithoutExt(String fileId) {
     final lastDotIndex = fileId.lastIndexOf('.');
-    if (lastDotIndex == -1) return fileId;
-    return fileId.substring(0, lastDotIndex);
+    if (lastDotIndex == -1) {
+      print('[SyncHistory] _getFilenameWithoutExt($fileId) -> $fileId (no extension)');
+      return fileId;
+    }
+    final result = fileId.substring(0, lastDotIndex);
+    return result;
+  }
+
+  /// Get all synced file IDs (for debugging)
+  Future<List<String>> getAllSyncedFileIds() async {
+    final db = await database;
+    final records = await db.query('sync_history', columns: ['file_id']);
+    return records.map((r) => r['file_id'] as String).toList();
   }
 
   /// Remove a specific file from sync history

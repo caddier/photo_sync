@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:photo_sync/sync_history.dart';
+import 'package:photo_sync/media_sync_protocol.dart';
 
 class PhoneTab extends StatefulWidget {
   const PhoneTab({super.key});
@@ -129,29 +130,67 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
   }
 
   Future<void> _loadPhotoSyncedStatus() async {
+    print('[PhoneTab] Loading photo synced status for ${_displayedPhotos.length} displayed photos (page ${_currentPhotoPage + 1})');
+    
+    // Debug: dump all database records
+    final allDbRecords = await _history.getAllSyncedFileIds();
+    print('[PhoneTab] Database contains ${allDbRecords.length} synced records');
+    
     final syncedIds = <String>{};
-    for (final a in _allPhotos) {
-      if (await _history.isFileSynced(a.id)) {
+    // Only check the currently displayed photos instead of all photos
+    for (final a in _displayedPhotos) {
+      // Get the filename for this asset (same way as sync process)
+      final assetFilename = await MediaSyncProtocol.getAssetFilename(a);
+      
+      print('[PhoneTab] Photo asset.id=${a.id}, filename=$assetFilename');
+      
+      // Pass the full filename WITH extension (same as sync process)
+      final isSynced = await _history.isFileSynced(assetFilename);
+      print('[PhoneTab] Photo $assetFilename synced: $isSynced');
+      if (isSynced) {
         syncedIds.add(a.id);
       }
     }
+    print('[PhoneTab] Found ${syncedIds.length} synced photos on current page');
     if (!mounted) return;
-    setState(() => _syncedPhotos
-      ..clear()
-      ..addAll(syncedIds));
+    setState(() {
+      // Only update the synced status for displayed photos, preserve others
+      for (final id in syncedIds) {
+        _syncedPhotos.add(id);
+      }
+    });
   }
 
   Future<void> _loadVideoSyncedStatus() async {
+    print('[PhoneTab] Loading video synced status for ${_displayedVideos.length} displayed videos (page ${_currentVideoPage + 1})');
+    
+    // Debug: dump all database records
+    final allDbRecords = await _history.getAllSyncedFileIds();
+    print('[PhoneTab] Database contains ${allDbRecords.length} synced records');
+    
     final syncedIds = <String>{};
-    for (final a in _allVideos) {
-      if (await _history.isFileSynced(a.id)) {
+    // Only check the currently displayed videos instead of all videos
+    for (final a in _displayedVideos) {
+      // Get the filename for this asset (same way as sync process)
+      final assetFilename = await MediaSyncProtocol.getAssetFilename(a);
+      
+      print('[PhoneTab] Video asset.id=${a.id}, filename=$assetFilename');
+      
+      // Pass the full filename WITH extension (same as sync process)
+      final isSynced = await _history.isFileSynced(assetFilename);
+      print('[PhoneTab] Video $assetFilename synced: $isSynced');
+      if (isSynced) {
         syncedIds.add(a.id);
       }
     }
+    print('[PhoneTab] Found ${syncedIds.length} synced videos on current page');
     if (!mounted) return;
-    setState(() => _syncedVideos
-      ..clear()
-      ..addAll(syncedIds));
+    setState(() {
+      // Only update the synced status for displayed videos, preserve others
+      for (final id in syncedIds) {
+        _syncedVideos.add(id);
+      }
+    });
   }
 
   void _updateDisplayedPhotos() {
@@ -319,6 +358,8 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
       _currentPhotoPage = index;
       _updateDisplayedPhotos();
     });
+    // Load sync status for the new page
+    _loadPhotoSyncedStatus();
   }
 
   void _goToVideoPage(int index) {
@@ -326,6 +367,8 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
       _currentVideoPage = index;
       _updateDisplayedVideos();
     });
+    // Load sync status for the new page
+    _loadVideoSyncedStatus();
   }
 
   Widget _buildAssetTile({
@@ -376,6 +419,18 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
                 child: Icon(Icons.play_circle_filled, color: Colors.white, size: 24),
               ),
 
+            // Synced overlay (green tint)
+            if (isSynced && !inDeleteMode)
+              Positioned.fill(
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    color: Colors.green.withOpacity(0.2),
+                    border: Border.all(color: Colors.green, width: 2),
+                  ),
+                ),
+              ),
+
             // Selection overlay
             if (isSelected)
               Positioned.fill(
@@ -409,7 +464,7 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
                 ),
               ),
 
-            // Synced indicator
+            // Synced indicator (top-left, keep the check icon)
             if (isSynced && !inDeleteMode)
               const Positioned(
                 top: 4,
@@ -417,7 +472,7 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
                 child: Icon(Icons.check_circle, color: Colors.green, size: 20),
               ),
 
-            // Selection checkbox
+            // Selection checkbox (top-right)
             if (!inDeleteMode)
               Positioned(
                 top: 4,
