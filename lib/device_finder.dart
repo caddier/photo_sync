@@ -2,7 +2,6 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:async';
 import 'package:network_info_plus/network_info_plus.dart';
-import 'package:device_info_plus/device_info_plus.dart';
 import 'package:photo_sync/sync_history.dart';
 
 //server suppose to listen on TCP Port 9922 for incoming connections
@@ -212,25 +211,22 @@ static String calculateBroadcastAddress(String ip, String mask) {
     } catch (e) {
       print('Error getting device name from database: $e');
     }
-    
-    // Fallback to system device name
-    final deviceInfo = DeviceInfoPlugin();
+
     if (Platform.isAndroid) {
-      final androidInfo = await deviceInfo.androidInfo;
-      return androidInfo.model.isNotEmpty ? androidInfo.model : 'Android';
-    } else if (Platform.isIOS) {
-      final iosInfo = await deviceInfo.iosInfo;
-      // iosInfo.name is deprecated and often empty
-      // Use utsname.nodename (user's device name like "Jason's iPhone")
-      // Fall back to model (like "iPhone 14 Pro") if nodename is empty
-      final nodeName = iosInfo.utsname.nodename;
-      if (nodeName.isNotEmpty) {
-        return nodeName;
+      // Use network_info_plus to get the WiFi name as device name
+      final info = NetworkInfo();
+      String? wifiName = await info.getWifiName();
+      if (wifiName != null && wifiName.isNotEmpty) {
+        return wifiName;
+      } else {
+        return 'Android Device';
       }
-      return iosInfo.model.isNotEmpty ? iosInfo.model : 'iPhone';
-    } else {
-      return Platform.operatingSystem;
+    } else if (Platform.isIOS) {
+      return 'iOS Device';
     }
+    
+    // Default fallback for other platforms
+    return 'Unknown Device';
   }
 
 }
