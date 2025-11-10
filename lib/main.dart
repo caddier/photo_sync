@@ -494,38 +494,40 @@ class _SyncPageState extends State<SyncPage>
         pageCount: 1000000,
       );
 
-      // Optimization: Use binary search to find where synced files end and unsynced begin.
-      // This reduces checks from O(n) to O(log n) - e.g., 800 files needs only ~10 checks!
+      final int totalCount = assets.length;
       
       setState(() {
-        _syncStatus = 'Finding sync position via binary search...';
+        _syncStatus = 'Checking sync status for $totalCount ${assetType}s...';
       });
       
-      int left = 0;
-      int right = assets.length;
-      int firstUnsyncedIndex = assets.length; // Assume all synced initially
+      final List<AssetEntity> unsyncedAssets = [];
+      int skippedFromCache = 0;
       
-      // Binary search to find the first unsynced file
-      while (left < right && !_cancelSync) {
-        int mid = (left + right) ~/ 2;
+      // Check all files sequentially (getAssetFilename is now very fast)
+      for (var i = 0; i < totalCount; i++) {
+        if (_cancelSync) break;
+        
+        final asset = assets[i];
         
         try {
-          final asset = assets[mid];
           final fileId = await MediaSyncProtocol.getAssetFilename(asset);
+          final isSynced = history.isFileSyncedCached(fileId);
           
-          if (history.isFileSyncedCached(fileId)) {
-            // This file is synced, so first unsynced must be after mid
-            left = mid + 1;
+          if (isSynced) {
+            skippedFromCache++;
           } else {
-            // This file is NOT synced, so first unsynced is at or before mid
-            firstUnsyncedIndex = mid;
-            right = mid;
+            unsyncedAssets.add(asset);
           }
         } catch (e) {
-          print('Error during binary search at index $mid: $e');
-          // On error, assume unsynced to be safe
-          firstUnsyncedIndex = mid;
-          right = mid;
+          print('Error checking asset ${asset.id}: $e');
+          unsyncedAssets.add(asset);
+        }
+        
+        // Update progress every 100 items
+        if ((i + 1) % 100 == 0) {
+          setState(() {
+            _syncStatus = 'Checking ${assetType}s: ${i + 1}/$totalCount...';
+          });
         }
       }
       
@@ -534,10 +536,11 @@ class _SyncPageState extends State<SyncPage>
         return;
       }
       
-      final skippedCount = firstUnsyncedIndex;
-      final unsyncedAssets = assets.skip(firstUnsyncedIndex).toList();
+      setState(() {
+        _syncStatus = 'Found ${unsyncedAssets.length} new ${assetType}s to sync (already synced: $skippedFromCache)';
+      });
       
-      print('Binary search complete: skipped $skippedCount already-synced ${assetType}s, syncing ${unsyncedAssets.length} remaining');
+      print('Checked $totalCount files, found ${unsyncedAssets.length} unsynced, skipped $skippedFromCache already synced');
       
       if (unsyncedAssets.isEmpty) {
         if (mounted) {
@@ -562,9 +565,9 @@ class _SyncPageState extends State<SyncPage>
 
         setState(() {
           if (type == RequestType.video) {
-            _syncStatus = 'Processing video ${i + 1} of ${unsyncedAssets.length}... (skipped: $skippedCount)';
+            _syncStatus = 'Processing video ${i + 1} of ${unsyncedAssets.length}... (skipped: $skippedFromCache)';
           } else {
-            _syncStatus = 'Processing ${i + 1} to ${(i + effectiveChunkSize).clamp(0, unsyncedAssets.length)} of ${unsyncedAssets.length} ${assetType}s... (skipped: $skippedCount)';
+            _syncStatus = 'Processing ${i + 1} to ${(i + effectiveChunkSize).clamp(0, unsyncedAssets.length)} of ${unsyncedAssets.length} ${assetType}s... (skipped: $skippedFromCache)';
           }
         });
 
@@ -578,9 +581,8 @@ class _SyncPageState extends State<SyncPage>
           try {
             // Step 1: Get filename WITHOUT loading full file data
             if (_cancelSync) break;
-            print('Getting filename for asset: ${asset.id}');
             final fileId = await MediaSyncProtocol.getAssetFilename(asset);
-            print('Filename determined: $fileId');
+            print('Filename determined: id: ${asset.id} -> name: $fileId');
             
             // Step 2: Double-check if synced (in case it was synced during this run)
             if (history.isFileSyncedCached(fileId)) {
@@ -615,7 +617,7 @@ class _SyncPageState extends State<SyncPage>
                   // Update status with chunk progress
                   final progress = (current / total * 100).toStringAsFixed(1);
                   setState(() {
-                    _syncStatus = 'Uploading video ${i + 1}/${unsyncedAssets.length}: chunk $current/$total ($progress%) (skipped: $skippedCount)';
+                    _syncStatus = 'Uploading video ${i + 1}/${unsyncedAssets.length}: chunk $current/$total ($progress%) (checked: $totalCount)';
                   });
                 },
               );

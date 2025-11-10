@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:async';
-import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:photo_manager/photo_manager.dart';
@@ -121,89 +120,18 @@ class MediaSyncProtocol {
   /// Get filename for an asset without loading the full file data
   /// This is useful for checking sync history before expensive file operations
   static Future<String> getAssetFilename(AssetEntity asset) async {
-    String filename = '';
-    String? filenameBase;
+
+   
     
-    // Try getting file and extracting filename
-    try {
-      final file = await asset.file;
-      if (file != null && file.path.isNotEmpty) {
-        // Extract just the filename from the path
-        final pathParts = file.path.split('/');
-        final filenamePart = pathParts.last;
-        // Extract base name without extension
-        if (filenamePart.isNotEmpty) {
-          final dotIndex = filenamePart.lastIndexOf('.');
-          if (dotIndex != -1) {
-            filenameBase = filenamePart.substring(0, dotIndex);
-          } else {
-            filenameBase = filenamePart;
-          }
-        }
-      }
-    } catch (e) {
-      print('Error accessing file for filename: $e');
-    }
+    // Generate filename directly from asset ID without accessing the file
+    // This avoids the slow asset.file call that accesses iOS photo library
+    final typePrefix = asset.type == AssetType.image ? 'IMG' : 'VID';
+    final defaultExt = asset.type == AssetType.image ? 'heic' : 'mov';
     
-    // If we got a filename base, we need to detect extension from a small sample
-    if (filenameBase != null && filenameBase.isNotEmpty) {
-      // Normalize by replacing / with _ (for asset IDs like IMG_1234/L0/001)
-      filenameBase = filenameBase.replaceAll('/', '_');
-      
-      // For videos, replace IMG prefix with VID if present
-      if (asset.type == AssetType.video) {
-        // Check if filename contains IMG_ and replace with VID_
-        if (filenameBase.contains('IMG_')) {
-          filenameBase = filenameBase.replaceAll('IMG_', 'VID_');
-        } else if (filenameBase.toUpperCase().contains('IMG_')) {
-          // Handle case-insensitive replacement
-          filenameBase = filenameBase.replaceAllMapped(
-            RegExp(r'IMG_', caseSensitive: false),
-            (match) => 'VID_',
-          );
-        }
-      }
-      
-      // Load only first 12 bytes for format detection
-      Uint8List? sampleBytes;
-      try {
-        final file = await asset.file;
-        if (file != null && file.existsSync()) {
-          // Open file and read only first 12 bytes to avoid loading large files into memory
-          final fileHandle = await file.open();
-          try {
-            sampleBytes = await fileHandle.read(12);
-          } finally {
-            await fileHandle.close();
-          }
-        }
-      } catch (e) {
-        print('Failed to read file sample for extension detection: $e');
-      }
-      
-      if (sampleBytes == null || sampleBytes.isEmpty) {
-        final originBytes = await asset.originBytes;
-        print('Warning: Origin bytes length: ${originBytes?.length}');
-        if (originBytes != null && originBytes.isNotEmpty) {
-          sampleBytes = Uint8List.fromList(originBytes.take(12).toList());
-        }
-      }
-      
-      if (sampleBytes != null && sampleBytes.isNotEmpty) {
-        final detectedExtension = _detectImageExtension(sampleBytes, asset.type);
-        filename = '$filenameBase.$detectedExtension';
-      }
-    }
+    // Normalize asset ID by replacing / with _
+    final normalizedId = asset.id.replaceAll('/', '_');
+    final filename = '${typePrefix}_${normalizedId}.$defaultExt';
     
-    // Fallback: Generate filename from asset ID if previous method failed
-    if (filename.isEmpty) {
-      final typePrefix = asset.type == AssetType.image ? 'IMG' : 'VID';
-      // Use a default extension based on type
-      final defaultExt = asset.type == AssetType.image ? 'jpg' : 'mp4';
-      // Normalize asset ID by replacing / with _
-      final normalizedId = asset.id.replaceAll('/', '_');
-      filename = '${typePrefix}_${normalizedId}.$defaultExt';
-    }
     
     return filename;
   }
@@ -449,69 +377,6 @@ class MediaSyncProtocol {
     // For images, pass the full bytes
     return AssetData(filename, filename, asset.type, 
       bytes: asset.type == AssetType.image ? bytes : null);
-  }
-
-  /// Detect image/video extension from file bytes
-  static String _detectImageExtension(Uint8List bytes, AssetType type) {
-    if (type == AssetType.video) {
-      // Check video signatures
-      if (bytes.length >= 12) {
-        // MP4/MOV (ftyp box)
-        if (bytes[4] == 0x66 && bytes[5] == 0x74 && bytes[6] == 0x79 && bytes[7] == 0x70) {
-          // Check specific brand
-          final brand = String.fromCharCodes(bytes.sublist(8, 12));
-          if (brand.startsWith('qt') || brand.startsWith('mov')) {
-            return 'mov';
-          }
-          return 'mp4';
-        }
-      }
-      return 'mp4'; // default for videos
-    }
-    
-    // Check image signatures
-    if (bytes.length >= 12) {
-      // JPEG (FF D8 FF)
-      if (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) {
-        return 'jpg';
-      }
-      
-      // PNG (89 50 4E 47)
-      if (bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) {
-        return 'png';
-      }
-      
-      // GIF (47 49 46 38)
-      if (bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x38) {
-        return 'gif';
-      }
-      
-      // WebP (RIFF ... WEBP)
-      if (bytes.length >= 12 &&
-          bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46 &&
-          bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50) {
-        return 'webp';
-      }
-      
-      // HEIC/HEIF (ftyp box with heic/mif1/msf1 brand)
-      if (bytes.length >= 12 &&
-          bytes[4] == 0x66 && bytes[5] == 0x74 && bytes[6] == 0x79 && bytes[7] == 0x70) {
-        final brand = String.fromCharCodes(bytes.sublist(8, 12));
-        if (brand == 'heic' || brand == 'heix' || brand == 'hevc' || 
-            brand == 'heim' || brand == 'heis' || brand == 'hevm' ||
-            brand == 'mif1' || brand == 'msf1') {
-          return 'heic';
-        }
-      }
-      
-      // BMP (42 4D)
-      if (bytes[0] == 0x42 && bytes[1] == 0x4D) {
-        return 'bmp';
-      }
-    }
-    
-    // Default fallback
-    return 'jpg';
   }
 
   /// Process asset in isolate - this is the isolate entry point (used for images only)

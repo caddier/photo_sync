@@ -135,6 +135,7 @@ class SyncHistory {
     final db = await database;
     final records = await db.query('sync_history', columns: ['file_id', 'file_type']);
     
+    // Always initialize the sets, even if empty
     _syncedFileIdsCache = records.map((r) => r['file_id'] as String).toSet();
     _syncedFileIdsWithoutExtCache = records.map((r) {
       final fileId = r['file_id'] as String;
