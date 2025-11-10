@@ -224,6 +224,7 @@ class _SyncPageState extends State<SyncPage>
     _deviceNameController.addListener(() {
       setState(() {});  // Trigger rebuild when device name changes
     });
+    _loadSyncCache();  // Load cache first for fast sync status checks
     _loadMediaCounts();
     _loadSyncedCounts();
     _loadDeviceName();
@@ -235,6 +236,15 @@ class _SyncPageState extends State<SyncPage>
     WidgetsBinding.instance.removeObserver(this);
     _deviceNameController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadSyncCache() async {
+    try {
+      await history.loadSyncedFilesCache();
+      print('Sync cache loaded successfully at app start');
+    } catch (e) {
+      print('Error loading sync cache: $e');
+    }
   }
 
   Future<void> _loadDeviceName() async {
@@ -484,12 +494,67 @@ class _SyncPageState extends State<SyncPage>
         pageCount: 1000000,
       );
 
+      // Optimization: Use binary search to find where synced files end and unsynced begin.
+      // This reduces checks from O(n) to O(log n) - e.g., 800 files needs only ~10 checks!
+      
+      setState(() {
+        _syncStatus = 'Finding sync position via binary search...';
+      });
+      
+      int left = 0;
+      int right = assets.length;
+      int firstUnsyncedIndex = assets.length; // Assume all synced initially
+      
+      // Binary search to find the first unsynced file
+      while (left < right && !_cancelSync) {
+        int mid = (left + right) ~/ 2;
+        
+        try {
+          final asset = assets[mid];
+          final fileId = await MediaSyncProtocol.getAssetFilename(asset);
+          
+          if (history.isFileSyncedCached(fileId)) {
+            // This file is synced, so first unsynced must be after mid
+            left = mid + 1;
+          } else {
+            // This file is NOT synced, so first unsynced is at or before mid
+            firstUnsyncedIndex = mid;
+            right = mid;
+          }
+        } catch (e) {
+          print('Error during binary search at index $mid: $e');
+          // On error, assume unsynced to be safe
+          firstUnsyncedIndex = mid;
+          right = mid;
+        }
+      }
+      
+      if (_cancelSync) {
+        _showErrorToast(context, 'Sync cancelled');
+        return;
+      }
+      
+      final skippedCount = firstUnsyncedIndex;
+      final unsyncedAssets = assets.skip(firstUnsyncedIndex).toList();
+      
+      print('Binary search complete: skipped $skippedCount already-synced ${assetType}s, syncing ${unsyncedAssets.length} remaining');
+      
+      if (unsyncedAssets.isEmpty) {
+        if (mounted) {
+          setState(() {
+            _syncStatus = 'All ${assetType}s already synced!';
+          });
+          await Future.delayed(const Duration(seconds: 2));
+        }
+        return;
+      }
+
       // For videos, process one at a time to avoid memory issues
       // For images, process in chunks for better performance
       final effectiveChunkSize = type == RequestType.video ? 1 : _chunkSize;
 
       // Process assets in chunks (1 for videos, _chunkSize for images)
-      for (var i = 0; i < assets.length; i += effectiveChunkSize) {
+      for (var i = 0; i < unsyncedAssets.length; i += effectiveChunkSize) {
         if (_cancelSync) {
           _showErrorToast(context, 'Sync cancelled');
           break;
@@ -497,13 +562,13 @@ class _SyncPageState extends State<SyncPage>
 
         setState(() {
           if (type == RequestType.video) {
-            _syncStatus = 'Processing video ${i + 1} of ${assets.length}...';
+            _syncStatus = 'Processing video ${i + 1} of ${unsyncedAssets.length}... (skipped: $skippedCount)';
           } else {
-            _syncStatus = 'Processing ${i + 1} to ${(i + effectiveChunkSize).clamp(0, assets.length)} of ${assets.length} ${assetType}s...';
+            _syncStatus = 'Processing ${i + 1} to ${(i + effectiveChunkSize).clamp(0, unsyncedAssets.length)} of ${unsyncedAssets.length} ${assetType}s... (skipped: $skippedCount)';
           }
         });
 
-        final chunk = assets.skip(i).take(effectiveChunkSize);
+        final chunk = unsyncedAssets.skip(i).take(effectiveChunkSize);
         for (var asset in chunk) {
           if (_cancelSync) break;
 
@@ -517,8 +582,8 @@ class _SyncPageState extends State<SyncPage>
             final fileId = await MediaSyncProtocol.getAssetFilename(asset);
             print('Filename determined: $fileId');
             
-            // Step 2: Check if already synced BEFORE loading the file
-            if (await history.isFileSynced(fileId)) {
+            // Step 2: Double-check if synced (in case it was synced during this run)
+            if (history.isFileSyncedCached(fileId)) {
               print('Asset $fileId already synced, skipping (file not loaded)');
               // Reload count from database to ensure accuracy
               await _loadSyncedCounts();
@@ -550,7 +615,7 @@ class _SyncPageState extends State<SyncPage>
                   // Update status with chunk progress
                   final progress = (current / total * 100).toStringAsFixed(1);
                   setState(() {
-                    _syncStatus = 'Uploading video ${i + 1}/${assets.length}: chunk $current/$total ($progress%)';
+                    _syncStatus = 'Uploading video ${i + 1}/${unsyncedAssets.length}: chunk $current/$total ($progress%) (skipped: $skippedCount)';
                   });
                 },
               );

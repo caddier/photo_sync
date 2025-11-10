@@ -227,8 +227,8 @@ class SyncHistory {
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
     
-    // Clear cache since database changed
-    clearCache();
+    // Reload cache instead of just clearing it to keep it available for ongoing sync
+    await loadSyncedFilesCache();
   }
 
   /// Get all records

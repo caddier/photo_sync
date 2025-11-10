@@ -183,6 +183,7 @@ class MediaSyncProtocol {
       
       if (sampleBytes == null || sampleBytes.isEmpty) {
         final originBytes = await asset.originBytes;
+        print('Warning: Origin bytes length: ${originBytes?.length}');
         if (originBytes != null && originBytes.isNotEmpty) {
           sampleBytes = Uint8List.fromList(originBytes.take(12).toList());
         }
