@@ -800,6 +800,7 @@ class _SyncPageState extends State<SyncPage>
 
     try {
       await history.clearHistory();
+      await history.loadSyncedFilesCache();  // Reload the cache with empty state
       await _loadSyncedCounts();  // This will load from database (should be 0 after clear)
       await _checkDeviceNameLock();  // Unlock device name after clearing history
       _showInfoToast(context, 'Sync history cleared — you can re-sync now.');
