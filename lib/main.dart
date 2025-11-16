@@ -8,6 +8,7 @@ import 'package:photo_sync/server_tab.dart';
 import 'package:photo_sync/phone_tab.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 //dart:io will be used if/when we add platform-specific foreground service code
 // import 'dart:io' show Platform;
 
@@ -18,7 +19,10 @@ import 'package:url_launcher/url_launcher.dart';
 
 
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Enable wakelock to keep screen on during app usage
+  await WakelockPlus.enable();
   runApp(const MainApp());
 }
 
@@ -59,6 +63,8 @@ class _MainTabPageState extends State<MainTabPage> with SingleTickerProviderStat
   void dispose() {
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
+    // Disable wakelock when app is disposed
+    WakelockPlus.disable();
     super.dispose();
   }
 
