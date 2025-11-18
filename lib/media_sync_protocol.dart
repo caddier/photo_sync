@@ -76,7 +76,9 @@ class MediaSyncPacketType {
   static const int mediaDownloadList = 11;
   
   /// Type 12: Media download acknowledgment - server sends requested media
-  /// Format: media file data or error message
+  /// Format: media file data or error message , if the file are only photos, the server will respond with a list of MediaPacket in JSON format with type  mediaDownloadAck
+  /// [{"IMG_123.jpg": "base64_photo_data"}, ...]
+  /// if the file is a video, then the server will respond with chunkedVideoStart (type 13), chunkedVideoData (type 14), chunkedVideoComplete (type 15) to transfer the video file
   static const int mediaDownloadAck = 12;
   
   /// Type 13: Chunked video start - client initiates chunked video transfer
@@ -236,7 +238,7 @@ class MediaSyncProtocol {
       await conn.sendData(encoded);
       
       // Wait for start acknowledgment
-      final startResponse = await _waitForResponse(conn, timeout: const Duration(seconds: 10), shouldCancel: shouldCancel);
+      final startResponse = await waitForResponse(conn, timeout: const Duration(seconds: 10), shouldCancel: shouldCancel);
       final startResponseStr = utf8.decode(startResponse.data);
       if (!startResponseStr.contains('OK:START')) {
         print('Server did not acknowledge chunked upload start');
@@ -293,7 +295,7 @@ class MediaSyncProtocol {
           final timeoutSeconds = (10 + chunkSizeMB * 1.5).ceil().clamp(10, 60);
           final timeout = Duration(seconds: timeoutSeconds);
           
-          final chunkResponse = await _waitForResponse(conn, timeout: timeout, shouldCancel: shouldCancel);
+          final chunkResponse = await waitForResponse(conn, timeout: timeout, shouldCancel: shouldCancel);
           final chunkResponseStr = utf8.decode(chunkResponse.data);
           if (!chunkResponseStr.contains('OK:CHUNK:$chunkIndex')) {
             print('Server did not acknowledge chunk $chunkIndex');
@@ -336,7 +338,7 @@ class MediaSyncProtocol {
       await conn.sendData(encoded);
       
       // Wait for final acknowledgment
-      final completeResponse = await _waitForResponse(conn, timeout: const Duration(seconds: 30), shouldCancel: shouldCancel);
+      final completeResponse = await waitForResponse(conn, timeout: const Duration(seconds: 30), shouldCancel: shouldCancel);
       final completeResponseStr = utf8.decode(completeResponse.data);
       if (completeResponse.type == MediaSyncPacketType.syncComplete && completeResponseStr.contains('OK:$fileId')) {
         print('Chunked upload completed successfully for $fileId');
@@ -466,7 +468,7 @@ class MediaSyncProtocol {
 
     // Wait for server response with calculated timeout and cancel support
     try {
-      final responsePacket = await _waitForResponse(conn, timeout: timeout, shouldCancel: shouldCancel);
+      final responsePacket = await waitForResponse(conn, timeout: timeout, shouldCancel: shouldCancel);
       print('response msg $responsePacket');
       final responseStr = utf8.decode(responsePacket.data);
       // syncComplete is used as the ack type
@@ -482,8 +484,8 @@ class MediaSyncProtocol {
     }
   }
 
-  /// Wait for a response packet from the server
-  static Future<PacketEnc> _waitForResponse(ServerConnection conn, {Duration timeout = const Duration(seconds: 10), bool Function()? shouldCancel}) async {
+  /// Wait for a response packet from the server (public)
+  static Future<PacketEnc> waitForResponse(ServerConnection conn, {Duration timeout = const Duration(seconds: 10), bool Function()? shouldCancel}) async {
     final completer = Completer<PacketEnc>();
 
     // Buffer to accumulate incoming data
@@ -560,7 +562,7 @@ class MediaSyncProtocol {
 
     // Wait for server response
     try {
-      final responsePacket = await _waitForResponse(conn);
+      final responsePacket = await waitForResponse(conn);
       // Expect a binary integer (big-endian) in data
       if (responsePacket.type == MediaSyncPacketType.mediaCountRsp) {
         final data = responsePacket.data;
@@ -621,7 +623,7 @@ class MediaSyncProtocol {
 
     // Wait for server response
     try {
-      final responsePacket = await _waitForResponse(conn);
+      final responsePacket = await waitForResponse(conn);
       if (responsePacket.type != MediaSyncPacketType.mediaThumbData) {
         print('Unexpected response type: ${responsePacket.type}');
         return [];

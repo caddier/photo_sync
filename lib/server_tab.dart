@@ -5,6 +5,7 @@ import 'package:photo_sync/server_conn.dart';
 import 'package:photo_sync/media_sync_protocol.dart';
 import 'package:photo_sync/sync_history.dart';
 import 'package:photo_sync/media_eumerator.dart';
+import 'package:photo_sync/packet_enc.dart';
 
 class ServerTab extends StatefulWidget {
   final DeviceInfo? selectedServer;
@@ -601,9 +602,9 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
               children: [
                 IconButton(
                   icon: const Icon(Icons.chevron_left),
-                  onPressed: _loading || _currentPage <= 0 
-                      ? null 
-                      : () => _loadPage(_currentPage - 1),
+                    onPressed: _loading || _currentPage <= 0
+                        ? null
+                        : () => _loadPage(_currentPage - 1),
                 ),
                 Text('Page ${_currentPage + 1} / $pageCount', style: const TextStyle(fontSize: 13)),
                 IconButton(
@@ -620,14 +621,95 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
   }
 
   // Download selected items (stub)
-  void _downloadSelected() {
-    final selectedItems = _selectedIndexes.map((idx) => _mediaItems[idx]).toList();
-    print('Download requested for ${selectedItems.length} items');
-    // TODO: Implement actual download logic here
-    setState(() {
-      _selectedIndexes.clear();
-    });
-    _showMessage('Download started for ${selectedItems.length} items');
+  Future<void> _downloadSelected() async {
+    if (_selectedIndexes.isEmpty || _loading) return;
+    setState(() { _loading = true; });
+    try {
+      final conn = await _ensureConnection();
+      final idx = _selectedIndexes.first;
+      final item = _mediaItems[idx];
+      if (item.id == null) {
+        _showMessage('Invalid file id');
+        setState(() { _loading = false; });
+        return;
+      }
+      final fileId = item.id!;
+      final isVideo = item.isVideo;
+      _showMessage('Downloading ${isVideo ? "video" : "photo"}: $fileId');
+
+      // Send mediaDownloadList request (single file)
+      final requestList = jsonEncode([fileId]);
+      final packet = PacketEnc(MediaSyncPacketType.mediaDownloadList, utf8.encode(requestList));
+      await conn.sendData(packet.encode());
+
+      // Wait for server response
+      final responsePacket = await MediaSyncProtocol.waitForResponse(conn);
+      bool downloadSuccess = false;
+      if (!isVideo && responsePacket.type == MediaSyncPacketType.mediaDownloadAck) {
+        // Photo download: response is a JSON list of MediaPacket
+        final responseStr = utf8.decode(responsePacket.data);
+        final photoList = jsonDecode(responseStr) as List<dynamic>;
+        if (photoList.isNotEmpty && photoList[0] is Map<String, dynamic>) {
+          final photoMap = photoList[0] as Map<String, dynamic>;
+          final base64Data = photoMap[fileId] as String?;
+          if (base64Data != null) {
+            // final bytes = base64Decode(base64Data); // Uncomment and use if saving to file
+            // TODO: Save photo bytes to gallery or file system
+            _showMessage('Photo downloaded: $fileId');
+            downloadSuccess = true;
+          } else {
+            _showMessage('Photo data not found in response');
+          }
+        } else {
+          _showMessage('Invalid photo response format');
+        }
+      } else if (isVideo && responsePacket.type == MediaSyncPacketType.chunkedVideoStart) {
+        // Video download: handle chunked transfer
+        final startInfo = jsonDecode(utf8.decode(responsePacket.data)) as Map<String, dynamic>;
+        final totalChunks = startInfo['totalChunks'] as int? ?? 0;
+        final videoId = startInfo['id'] as String? ?? fileId;
+        List<int> videoBytes = [];
+        for (int chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+          final chunkPacket = await MediaSyncProtocol.waitForResponse(conn);
+          if (chunkPacket.type != MediaSyncPacketType.chunkedVideoData) {
+            _showMessage('Unexpected packet type during video download');
+            break;
+          }
+          final chunkInfo = jsonDecode(utf8.decode(chunkPacket.data)) as Map<String, dynamic>;
+          final base64Chunk = chunkInfo['data'] as String?;
+          if (base64Chunk != null) {
+            videoBytes.addAll(base64Decode(base64Chunk));
+          }
+          _showMessage('Downloaded chunk ${chunkIndex + 1}/$totalChunks');
+        }
+        // Wait for chunkedVideoComplete
+        final completePacket = await MediaSyncProtocol.waitForResponse(conn);
+        if (completePacket.type == MediaSyncPacketType.chunkedVideoComplete) {
+          // TODO: Save videoBytes to file system
+          _showMessage('Video downloaded: $videoId');
+          downloadSuccess = true;
+        } else {
+          _showMessage('Video download did not complete correctly');
+        }
+      } else {
+        _showMessage('Unexpected response type: ${responsePacket.type}');
+      }
+      // If download succeeded, add green marker by updating local media filenames
+      if (downloadSuccess && item.id != null) {
+        final lastDot = item.id!.lastIndexOf('.');
+        String filenameWithoutExt = lastDot > 0 ? item.id!.substring(0, lastDot) : item.id!;
+        setState(() {
+          _localMediaFilenames.add(filenameWithoutExt);
+        });
+      }
+    } catch (e) {
+      _showMessage('Download error: $e');
+    } finally {
+      setState(() {
+        _selectedIndexes.clear();
+        _loading = false;
+      });
+    }
   }
 }
 
