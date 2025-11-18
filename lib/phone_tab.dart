@@ -513,18 +513,6 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
                 child: Icon(Icons.play_circle_filled, color: Colors.white, size: 24),
               ),
 
-            // Synced overlay (green tint)
-            if (isSynced && !inDeleteMode)
-              Positioned.fill(
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(8),
-                    color: Colors.green.withOpacity(0.2),
-                    border: Border.all(color: Colors.green, width: 2),
-                  ),
-                ),
-              ),
-
             // Selection overlay
             if (isSelected)
               Positioned.fill(
@@ -558,19 +546,31 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
                 ),
               ),
 
-            // Synced indicator (top-left, keep the check icon)
+            // Synced indicator (top-right, green check in circle, same as server tab)
             if (isSynced && !inDeleteMode)
-              const Positioned(
-                top: 4,
-                left: 4,
-                child: Icon(Icons.check_circle, color: Colors.green, size: 20),
-              ),
-
-            // Selection checkbox (top-right)
-            if (!inDeleteMode)
               Positioned(
                 top: 4,
                 right: 4,
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.green,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                  ),
+                  child: const Icon(
+                    Icons.check,
+                    color: Colors.white,
+                    size: 16,
+                  ),
+                ),
+              ),
+
+            // Selection checkbox (top-left)
+            if (!inDeleteMode)
+              Positioned(
+                top: 4,
+                left: 4,
                 child: Icon(
                   isSelected ? Icons.check_circle : Icons.circle_outlined,
                   color: isSelected ? Colors.blue : Colors.white,
