@@ -422,6 +422,24 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
                       foregroundColor: Colors.white,
                     ),
                   ),
+                  if (pageCount > 1) ...[
+                    const SizedBox(width: 16),
+                    DropdownButton<int>(
+                      value: _currentPage,
+                      items: List.generate(pageCount, (i) => DropdownMenuItem(
+                        value: i,
+                        child: Text('Page ${i + 1}'),
+                      )),
+                      onChanged: _loading ? null : (int? selected) {
+                        if (selected != null && selected != _currentPage) {
+                          _loadPage(selected);
+                        }
+                      },
+                      underline: Container(),
+                      style: const TextStyle(fontSize: 14, color: Colors.black),
+                      isDense: true,
+                    ),
+                  ],
                 ],
               ),
               if (_totalMediaCount > 0)
