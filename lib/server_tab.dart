@@ -110,18 +110,17 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
         _totalMediaCount = count;
       });
 
-      // 3. Request media thumbnail list for the first page
+      // 3. Request media thumbnail list for the current page
       if (count > 0) {
-        print('ServerTab: Requesting thumbnail list for page 0...');
+        print('ServerTab: Requesting thumbnail list for page $_currentPage...');
         final thumbList = await MediaSyncProtocol.getMediaThumbList(
           conn, 
-          0, // page index 0 (first page)
+          _currentPage, // refresh current page
           _itemsPerPage
         );
         print('ServerTab: Received ${thumbList.length} thumbnails');
 
         if (!mounted) return;
-        
         // Update the UI with the thumbnail data
         setState(() {
           _mediaItems = thumbList.map((thumb) => ServerMediaItem(
@@ -129,7 +128,7 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
             thumbData: thumb.thumbData,
             isVideo: thumb.isVideo,
           )).toList();
-          _currentPage = 0;
+          // Do not reset _currentPage here
           _loading = false;
         });
       } else {
