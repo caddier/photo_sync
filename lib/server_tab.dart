@@ -19,6 +19,7 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
   int _currentPage = 0;
   static const int _itemsPerPage = 12;
   List<ServerMediaItem> _mediaItems = [];
+  Set<int> _selectedIndexes = {}; // Indexes of selected items
   bool _loading = false;
   int _totalMediaCount = 0;
   ServerConnection? _connection; // Persistent connection
@@ -398,49 +399,66 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
           padding: const EdgeInsets.symmetric(vertical: 8.0),
           child: Column(
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  ElevatedButton.icon(
-                    onPressed: _loading ? null : _refreshGallery,
-                    icon: const Icon(Icons.refresh, size: 18),
-                    label: const Text('Refresh', style: TextStyle(fontSize: 14)),
-                    style: ElevatedButton.styleFrom(
-                      minimumSize: const Size(100, 32),
-                      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (_selectedIndexes.isNotEmpty)
+                      ElevatedButton.icon(
+                        onPressed: _loading ? null : _downloadSelected,
+                        icon: const Icon(Icons.download, size: 16),
+                        label: const Text('Download', style: TextStyle(fontSize: 12)),
+                        style: ElevatedButton.styleFrom(
+                          minimumSize: const Size(80, 28),
+                          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                          backgroundColor: Colors.blue,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    if (_selectedIndexes.isNotEmpty)
+                      const SizedBox(width: 6),
+                    ElevatedButton.icon(
+                      onPressed: _loading ? null : _refreshGallery,
+                      icon: const Icon(Icons.refresh, size: 16),
+                      label: const Text('Refresh', style: TextStyle(fontSize: 12)),
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(80, 28),
+                        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton.icon(
-                    onPressed: _loading ? null : _syncDatabaseWithServer,
-                    icon: const Icon(Icons.sync, size: 18),
-                    label: const Text('Sync DB', style: TextStyle(fontSize: 14)),
-                    style: ElevatedButton.styleFrom(
-                      minimumSize: const Size(100, 32),
-                      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-                      backgroundColor: Colors.orange.shade700,
-                      foregroundColor: Colors.white,
+                    const SizedBox(width: 6),
+                    ElevatedButton.icon(
+                      onPressed: _loading ? null : _syncDatabaseWithServer,
+                      icon: const Icon(Icons.sync, size: 16),
+                      label: const Text('Sync DB', style: TextStyle(fontSize: 12)),
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(80, 28),
+                        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                        backgroundColor: Colors.orange.shade700,
+                        foregroundColor: Colors.white,
+                      ),
                     ),
-                  ),
-                  if (pageCount > 1) ...[
-                    const SizedBox(width: 16),
-                    DropdownButton<int>(
-                      value: _currentPage,
-                      items: List.generate(pageCount, (i) => DropdownMenuItem(
-                        value: i,
-                        child: Text('Page ${i + 1}'),
-                      )),
-                      onChanged: _loading ? null : (int? selected) {
-                        if (selected != null && selected != _currentPage) {
-                          _loadPage(selected);
-                        }
-                      },
-                      underline: Container(),
-                      style: const TextStyle(fontSize: 14, color: Colors.black),
-                      isDense: true,
-                    ),
+                    if (pageCount > 1) ...[
+                      const SizedBox(width: 10),
+                      DropdownButton<int>(
+                        value: _currentPage,
+                        items: List.generate(pageCount, (i) => DropdownMenuItem(
+                          value: i,
+                          child: Text('Page ${i + 1}', style: const TextStyle(fontSize: 12)),
+                        )),
+                        onChanged: _loading ? null : (int? selected) {
+                          if (selected != null && selected != _currentPage) {
+                            _loadPage(selected);
+                          }
+                        },
+                        underline: Container(),
+                        style: const TextStyle(fontSize: 12, color: Colors.black),
+                        isDense: true,
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
               if (_totalMediaCount > 0)
                 Padding(
@@ -487,63 +505,90 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
                   itemBuilder: (context, idx) {
                     final item = _mediaItems[idx];
                     final isInLibrary = item.id != null && _isMediaInLocalLibrary(item.id!);
-                    
-                    return Stack(
-                      children: [
-                        Positioned.fill(
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: _buildMediaWidget(item),
+                    final isSelected = _selectedIndexes.contains(idx);
+                    return GestureDetector(
+                      onTap: (!isInLibrary && !_loading)
+                          ? () {
+                              setState(() {
+                                if (isSelected) {
+                                  _selectedIndexes.remove(idx);
+                                } else {
+                                  _selectedIndexes.add(idx);
+                                }
+                              });
+                            }
+                          : null,
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: _buildMediaWidget(item),
+                            ),
                           ),
-                        ),
-                        if (item.isVideo)
-                          Positioned(
-                            right: 4,
-                            bottom: 4,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.6),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: const [
-                                  Icon(Icons.videocam, color: Colors.white, size: 14),
-                                  SizedBox(width: 4),
-                                  Text(
-                                    'VIDEO',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                      letterSpacing: 0.5,
+                          if (item.isVideo)
+                            Positioned(
+                              right: 4,
+                              bottom: 4,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.6),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: const [
+                                    Icon(Icons.videocam, color: Colors.white, size: 14),
+                                    SizedBox(width: 4),
+                                    Text(
+                                      'VIDEO',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 0.5,
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                        // Green checkmark for media that exists in local library
-                        if (isInLibrary)
-                          Positioned(
-                            top: 4,
-                            right: 4,
-                            child: Container(
-                              padding: const EdgeInsets.all(4),
-                              decoration: BoxDecoration(
-                                color: Colors.green,
-                                shape: BoxShape.circle,
-                                border: Border.all(color: Colors.white, width: 2),
-                              ),
-                              child: const Icon(
-                                Icons.check,
-                                color: Colors.white,
-                                size: 16,
+                          // Green checkmark for media that exists in local library
+                          if (isInLibrary)
+                            Positioned(
+                              top: 4,
+                              right: 4,
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  color: Colors.green,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.white, width: 2),
+                                ),
+                                child: const Icon(
+                                  Icons.check,
+                                  color: Colors.white,
+                                  size: 16,
+                                ),
                               ),
                             ),
-                          ),
-                      ],
+                          // Selection overlay for selected items
+                          if (isSelected)
+                            Positioned.fill(
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.blue.withOpacity(0.3),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.blue, width: 2),
+                                ),
+                                child: const Center(
+                                  child: Icon(Icons.check_circle, color: Colors.blue, size: 32),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
                     );
                   },
                 ),
@@ -572,6 +617,17 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
           ),
       ],
     );
+  }
+
+  // Download selected items (stub)
+  void _downloadSelected() {
+    final selectedItems = _selectedIndexes.map((idx) => _mediaItems[idx]).toList();
+    print('Download requested for ${selectedItems.length} items');
+    // TODO: Implement actual download logic here
+    setState(() {
+      _selectedIndexes.clear();
+    });
+    _showMessage('Download started for ${selectedItems.length} items');
   }
 }
 
