@@ -584,10 +584,11 @@ class _SyncPageState extends State<SyncPage>
           // Re-check cancel before heavy work
           if (_cancelSync) break;
 
+          String? fileId;
           try {
             // Step 1: Get filename WITHOUT loading full file data
             if (_cancelSync) break;
-            final fileId = await MediaSyncProtocol.getAssetFilename(asset);
+            fileId = await MediaSyncProtocol.getAssetFilename(asset);
             print('Filename determined: id: ${asset.id} -> name: $fileId');
             
             // Step 2: Double-check if synced (in case it was synced during this run)
@@ -655,10 +656,37 @@ class _SyncPageState extends State<SyncPage>
               await _loadSyncedCounts();
               print('Successfully synced $assetType $fileId');
             } else {
-              print('Server failed to acknowledge $assetType $fileId');
+              print('❌ Server failed to acknowledge $assetType $fileId - marking as failed');
+              if (mounted) {
+                setState(() {
+                  _syncStatus = 'Warning: Failed to sync $fileId';
+                });
+                await Future.delayed(const Duration(seconds: 1));
+              }
             }
           } catch (e) {
-            print('Error syncing $assetType: $e');
+            final errorFileId = fileId ?? 'unknown';
+            print('❌ ERROR syncing $assetType (${errorFileId}): $e');
+            print('   Asset ID: ${asset.id}');
+            print('   Asset Type: ${asset.type}');
+            
+            // Determine if this is an iCloud error
+            final errorString = e.toString();
+            final isICloudError = errorString.contains('PHPhotosErrorDomain') || 
+                                  errorString.contains('iCloud') ||
+                                  errorString.contains('not available');
+            
+            // Show error to user with helpful message
+            if (mounted && !_cancelSync) {
+              setState(() {
+                if (isICloudError) {
+                  _syncStatus = 'Skipped: $errorFileId (not downloaded from iCloud)';
+                } else {
+                  _syncStatus = 'Error with file: $errorFileId - skipping';
+                }
+              });
+              await Future.delayed(const Duration(seconds: 2));
+            }
             // Continue with next asset even if one fails
           }
           

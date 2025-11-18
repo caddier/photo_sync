@@ -132,37 +132,59 @@ class SyncHistory {
 
   /// Load all synced file IDs into cache (call this once when phone tab loads)
   Future<void> loadSyncedFilesCache() async {
-    final db = await database;
-    final records = await db.query('sync_history', columns: ['file_id', 'file_type']);
-    
-    // Always initialize the sets, even if empty
-    _syncedFileIdsCache = records.map((r) => r['file_id'] as String).toSet();
-    _syncedFileIdsWithoutExtCache = records.map((r) {
-      final fileId = r['file_id'] as String;
-      return _getFilenameWithoutExt(fileId);
-    }).toSet();
-    
-    // Count photos and videos separately
-    _syncedPhotoCount = 0;
-    _syncedVideoCount = 0;
-    for (final record in records) {
-      final fileType = record['file_type'] as String?;
-      if (fileType == 'video') {
-        _syncedVideoCount++;
-      } else {
-        // Treat null or any other type as photo
-        _syncedPhotoCount++;
+    try {
+      final db = await database;
+      final records = await db.query('sync_history', columns: ['file_id', 'file_type']);
+      
+      // Always initialize the sets, even if empty
+      _syncedFileIdsCache = records.map((r) => r['file_id'] as String).toSet();
+      _syncedFileIdsWithoutExtCache = records.map((r) {
+        final fileId = r['file_id'] as String;
+        return _getFilenameWithoutExt(fileId);
+      }).toSet();
+      
+      // Count photos and videos separately
+      _syncedPhotoCount = 0;
+      _syncedVideoCount = 0;
+      for (final record in records) {
+        final fileType = record['file_type'] as String?;
+        if (fileType == 'video') {
+          _syncedVideoCount++;
+        } else {
+          // Treat null or any other type as photo
+          _syncedPhotoCount++;
+        }
       }
+      
+      print('[SyncHistory] Cache loaded: ${_syncedFileIdsCache!.length} files ($_syncedPhotoCount photos, $_syncedVideoCount videos)');
+    } catch (e) {
+      // If error occurs, initialize empty sets to prevent null errors
+      print('[SyncHistory] Error loading cache: $e - initializing empty cache');
+      _syncedFileIdsCache = {};
+      _syncedFileIdsWithoutExtCache = {};
+      _syncedPhotoCount = 0;
+      _syncedVideoCount = 0;
     }
-    
-    print('[SyncHistory] Cache loaded: ${_syncedFileIdsCache!.length} files ($_syncedPhotoCount photos, $_syncedVideoCount videos)');
   }
 
   /// Check if a file is synced using cache (much faster than isFileSynced)
   /// Call loadSyncedFilesCache() first to populate the cache
+  /// If cache is not loaded, it will be loaded automatically (with a warning)
   bool isFileSyncedCached(String fileId) {
+    // Auto-load cache if not initialized (defensive programming)
     if (_syncedFileIdsCache == null || _syncedFileIdsWithoutExtCache == null) {
-      throw StateError('Cache not loaded. Call loadSyncedFilesCache() first.');
+      print('[SyncHistory] WARNING: Cache not loaded when checking $fileId. Auto-initializing empty cache.');
+      print('[SyncHistory] Please call loadSyncedFilesCache() before sync operations for better performance.');
+      // Initialize empty cache to prevent crashes
+      _syncedFileIdsCache = {};
+      _syncedFileIdsWithoutExtCache = {};
+      _syncedPhotoCount = 0;
+      _syncedVideoCount = 0;
+      // Schedule async load for next check
+      loadSyncedFilesCache().catchError((e) {
+        print('[SyncHistory] Error auto-loading cache: $e');
+      });
+      return false; // First check will always return false, but cache will be ready for next check
     }
     
     // Normalize the fileId by replacing / with _
@@ -229,7 +251,12 @@ class SyncHistory {
     );
     
     // Reload cache instead of just clearing it to keep it available for ongoing sync
-    await loadSyncedFilesCache();
+    try {
+      await loadSyncedFilesCache();
+    } catch (e) {
+      print('[SyncHistory] Error reloading cache after recordSync: $e');
+      // Don't throw - the record was saved, cache will be reloaded eventually
+    }
   }
 
   /// Get all records

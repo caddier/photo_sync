@@ -4,6 +4,7 @@ import 'package:photo_sync/device_finder.dart';
 import 'package:photo_sync/server_conn.dart';
 import 'package:photo_sync/media_sync_protocol.dart';
 import 'package:photo_sync/sync_history.dart';
+import 'package:photo_sync/media_eumerator.dart';
 
 class ServerTab extends StatefulWidget {
   final DeviceInfo? selectedServer;
@@ -21,6 +22,8 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
   bool _loading = false;
   int _totalMediaCount = 0;
   ServerConnection? _connection; // Persistent connection
+  Set<String> _localMediaFilenames = {}; // Cache of local media filenames (without extensions)
+  bool _localMediaLoaded = false;
 
   // selectedServer is now provided via the widget constructor from MainTabPage
 
@@ -248,6 +251,54 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
     );
   }
 
+  /// Load all local media filenames using MediaSyncProtocol.getAssetFilename
+  Future<void> _loadLocalMediaFilenames() async {
+    if (_localMediaLoaded) return; // Already loaded
+    
+    try {
+      print('Loading local media filenames using getAssetFilename...');
+      final assets = await MediaEnumerator.getAllLocalAssets();
+      final Set<String> filenames = {};
+      
+      // Use MediaSyncProtocol.getAssetFilename to get consistent filenames
+      for (var asset in assets) {
+        try {
+          final filename = await MediaSyncProtocol.getAssetFilename(asset);
+          // Remove extension for comparison
+          final lastDot = filename.lastIndexOf('.');
+          if (lastDot > 0) {
+            final filenameWithoutExt = filename.substring(0, lastDot);
+            filenames.add(filenameWithoutExt);
+          }
+        } catch (e) {
+          print('Error getting filename for asset: $e');
+        }
+      }
+      
+      if (mounted) {
+        setState(() {
+          _localMediaFilenames = filenames;
+          _localMediaLoaded = true;
+        });
+        print('Loaded ${filenames.length} local media filenames');
+      }
+    } catch (e) {
+      print('Error loading local media filenames: $e');
+    }
+  }
+
+  /// Check if a server file exists in local library by comparing filenames without extensions
+  bool _isMediaInLocalLibrary(String serverFileId) {
+    // Extract filename without extension from server file ID
+    String filenameWithoutExt = serverFileId;
+    final lastDot = serverFileId.lastIndexOf('.');
+    if (lastDot > 0) {
+      filenameWithoutExt = serverFileId.substring(0, lastDot);
+    }
+    
+    return _localMediaFilenames.contains(filenameWithoutExt);
+  }
+
   Widget _buildMediaWidget(ServerMediaItem item) {
     // If we have thumbData (base64), decode and display it
     if (item.thumbData != null && item.thumbData!.isNotEmpty) {
@@ -293,6 +344,7 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _loadLocalMediaFilenames(); // Load local media filenames in background
     _refreshGallery();
   }
 
@@ -417,6 +469,8 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
                   itemCount: _mediaItems.length,
                   itemBuilder: (context, idx) {
                     final item = _mediaItems[idx];
+                    final isInLibrary = item.id != null && _isMediaInLocalLibrary(item.id!);
+                    
                     return Stack(
                       children: [
                         Positioned.fill(
@@ -450,6 +504,25 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
                                     ),
                                   ),
                                 ],
+                              ),
+                            ),
+                          ),
+                        // Green checkmark for media that exists in local library
+                        if (isInLibrary)
+                          Positioned(
+                            top: 4,
+                            right: 4,
+                            child: Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                color: Colors.green,
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 2),
+                              ),
+                              child: const Icon(
+                                Icons.check,
+                                color: Colors.white,
+                                size: 16,
                               ),
                             ),
                           ),

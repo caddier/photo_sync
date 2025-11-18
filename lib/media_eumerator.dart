@@ -168,6 +168,30 @@ static Future<String> getMediaFileId(AssetEntity asset) async {
     return result;
   }
 
+  /// Get all local media assets (photos and videos) for filename comparison
+  static Future<List<AssetEntity>> getAllLocalAssets() async {
+    bool granted = await requestPermission();
+    if (!granted) {
+      PhotoManager.openSetting();
+      return [];
+    }
 
+    // Get all photos and videos
+    final albums = await PhotoManager.getAssetPathList(
+      type: RequestType.common, // Get both images and videos
+      hasAll: true,
+    );
+
+    if (albums.isEmpty) return [];
+
+    // Use the "All" album (usually the first one)
+    final allAlbum = albums.first;
+    final totalCount = await allAlbum.assetCountAsync;
+    
+    // Get all assets from the album
+    final mediaList = await allAlbum.getAssetListRange(start: 0, end: totalCount);
+    
+    return mediaList;
+  }
 
 }

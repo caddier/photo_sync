@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:photo_manager/photo_manager.dart';
@@ -189,14 +190,31 @@ class MediaSyncProtocol {
     // Chunk size: 10MB per chunk (balance between memory and network efficiency)
     const int chunkSize = 10 * 1024 * 1024; // 10MB
     
-    // Get file handle
-    final file = await asset.file;
-    if (file == null || !file.existsSync()) {
-      print('Video file not found for chunked upload: $fileId');
+    // Get file handle with error handling for iCloud/unavailable files
+    File? file;
+    try {
+      file = await asset.file;
+    } catch (e) {
+      print('❌ Cannot access video file (may be in iCloud or corrupted): $fileId');
+      print('   Error: $e');
       return false;
     }
     
-    final fileSize = await file.length();
+    if (file == null || !file.existsSync()) {
+      print('❌ Video file not found or not downloaded locally: $fileId');
+      print('   This file may be stored in iCloud. Please ensure it is downloaded to your device.');
+      return false;
+    }
+    
+    int fileSize;
+    try {
+      fileSize = await file.length();
+    } catch (e) {
+      print('❌ Cannot read video file size: $fileId');
+      print('   Error: $e');
+      return false;
+    }
+    
     final totalChunks = (fileSize / chunkSize).ceil();
     
     print('Starting chunked upload for $fileId: ${(fileSize / (1024 * 1024)).toStringAsFixed(2)} MB in $totalChunks chunks');
