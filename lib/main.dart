@@ -14,10 +14,6 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 // Optional: foreground service on Android. Native setup required in AndroidManifest.
 // import 'package:flutter_foreground_task/flutter_foreground_task.dart';
-  
-  
-
-
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,7 +21,6 @@ void main() async {
   await WakelockPlus.enable();
   runApp(const MainApp());
 }
-
 
 class MainApp extends StatelessWidget {
   const MainApp({super.key});
@@ -46,7 +41,8 @@ class MainTabPage extends StatefulWidget {
   State<MainTabPage> createState() => _MainTabPageState();
 }
 
-class _MainTabPageState extends State<MainTabPage> with SingleTickerProviderStateMixin {
+class _MainTabPageState extends State<MainTabPage>
+    with SingleTickerProviderStateMixin {
   String? _selectedServerName;
   DeviceInfo? _selectedServer;
   late TabController _tabController;
@@ -90,9 +86,9 @@ class _MainTabPageState extends State<MainTabPage> with SingleTickerProviderStat
     if (await canLaunchUrl(url)) {
       await launchUrl(url, mode: LaunchMode.externalApplication);
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not launch $url')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not launch $url')));
     }
   }
 
@@ -108,56 +104,64 @@ class _MainTabPageState extends State<MainTabPage> with SingleTickerProviderStat
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: _selectedServerName == null
-            ? const Text('Photo Sync')
-            : Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('Photo Sync: '),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.cloud_queue,
-                          size: 16,
-                          color: Colors.blue.shade300,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          '[ $_selectedServerName ]',
-                          style: TextStyle(
+        title:
+            _selectedServerName == null
+                ? const Text('Photo Sync')
+                : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Photo Sync: '),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.cloud_queue,
+                            size: 16,
                             color: Colors.blue.shade300,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
                           ),
-                        ),
-                        if (_selectedServer != null && _selectedServer!.ipAddress != null)
-                          Padding(
-                            padding: const EdgeInsets.only(left: 8),
-                            child: InkWell(
-                              onTap: () => _launchServerInBrowser(_selectedServer!.ipAddress!),
-                              child: Text(
-                                '[${_selectedServer!.ipAddress!}]',
-                                style: const TextStyle(
-                                  color: Colors.amberAccent,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13,
-                                  decoration: TextDecoration.underline,
+                          const SizedBox(width: 6),
+                          Text(
+                            '[ $_selectedServerName ]',
+                            style: TextStyle(
+                              color: Colors.blue.shade300,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                          if (_selectedServer != null &&
+                              _selectedServer!.ipAddress != null)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 8),
+                              child: InkWell(
+                                onTap:
+                                    () => _launchServerInBrowser(
+                                      _selectedServer!.ipAddress!,
+                                    ),
+                                child: Text(
+                                  '[${_selectedServer!.ipAddress!}]',
+                                  style: const TextStyle(
+                                    color: Colors.amberAccent,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    decoration: TextDecoration.underline,
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
         centerTitle: false,
         toolbarHeight: 70, // Increased height for better visibility
         bottom: PreferredSize(
@@ -191,8 +195,12 @@ class _MainTabPageState extends State<MainTabPage> with SingleTickerProviderStat
 class SyncPage extends StatefulWidget {
   final void Function(String?)? onServerSelected;
   final void Function(DeviceInfo?)? onSelectedServerChanged;
-  
-  const SyncPage({super.key, this.onServerSelected, this.onSelectedServerChanged});
+
+  const SyncPage({
+    super.key,
+    this.onServerSelected,
+    this.onSelectedServerChanged,
+  });
 
   @override
   State<SyncPage> createState() => _SyncPageState();
@@ -204,7 +212,7 @@ typedef SyncPageState = _SyncPageState;
 enum SyncMode { none, photos, videos, all }
 
 class _SyncPageState extends State<SyncPage>
-  with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
+    with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
   // Media totals
   int totalPhotos = 0;
   int totalVideos = 0;
@@ -228,13 +236,25 @@ class _SyncPageState extends State<SyncPage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _deviceNameController.addListener(() {
-      setState(() {});  // Trigger rebuild when device name changes
+      setState(() {}); // Trigger rebuild when device name changes
     });
-    _loadSyncCache();  // Load cache first for fast sync status checks
+    _loadSyncCache(); // Load cache first for fast sync status checks
     _loadMediaCounts();
     _loadSyncedCounts();
     _loadDeviceName();
     _checkDeviceNameLock();
+  }
+
+  void _showInfoToast(BuildContext context, String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _showErrorToast(BuildContext context, String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
+    );
   }
 
   @override
@@ -322,9 +342,13 @@ class _SyncPageState extends State<SyncPage>
           }
         });
       }
-    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive || state == AppLifecycleState.detached) {
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
       // In case of backgrounding during sync, force-close active connection so awaits unblock
-      try { _activeConn?.disconnect(); } catch (_) {}
+      try {
+        _activeConn?.disconnect();
+      } catch (_) {}
     }
   }
 
@@ -391,10 +415,11 @@ class _SyncPageState extends State<SyncPage>
   final history = SyncHistory();
   bool _isSyncing = false;
   String? _syncStatus;
-  bool _cancelSync = false;  // Flag to cancel ongoing sync
-  bool _userCancelled = false;  // Flag to track user-initiated cancellation
-  ServerConnection? _activeConn; // Currently active connection for sync (to force-cancel)
-  
+  bool _cancelSync = false; // Flag to cancel ongoing sync
+  bool _userCancelled = false; // Flag to track user-initiated cancellation
+  ServerConnection?
+  _activeConn; // Currently active connection for sync (to force-cancel)
+
   // Device name state
   final TextEditingController _deviceNameController = TextEditingController();
 
@@ -408,22 +433,38 @@ class _SyncPageState extends State<SyncPage>
 
     try {
       final stream = DeviceManager.discoverDevicesStream(timeoutSeconds: 5);
-      stream.listen((device) {
-        // Avoid duplicates (same name + ip)
-        final exists = discoveredServers.any((d) => d.deviceName == device.deviceName && d.ipAddress == device.ipAddress);
-        if (!exists) {
-          setState(() {
-            discoveredServers.add(device);
-          });
-        }
-      }, onError: (e) {
-        print('Discovery error: $e');
-      }, onDone: () {
-        print('Discovery finished');
-      });
+      stream.listen(
+        (device) {
+          // Avoid duplicates (same name + ip)
+          final exists = discoveredServers.any(
+            (d) =>
+                d.deviceName == device.deviceName &&
+                d.ipAddress == device.ipAddress,
+          );
+          if (!exists) {
+            setState(() {
+              discoveredServers.add(device);
+            });
+          }
+        },
+        onError: (e) {
+          print('Discovery error: $e');
+        },
+        onDone: () {
+          print('Discovery finished');
+        },
+      );
     } catch (e) {
       print('Error starting discovery: $e');
     }
+  }
+
+  Future<bool> _checkServerSelected() async {
+    if (selectedServer == null) {
+      _showErrorToast(context, 'No server selected');
+      return false;
+    }
+    return true;
   }
 
   void selectServer(DeviceInfo server) {
@@ -435,10 +476,12 @@ class _SyncPageState extends State<SyncPage>
         print('DEBUG: Deselected server, calling callbacks with null');
       } else {
         selectedServer = server;
-        print('DEBUG: Selected server: ${server.deviceName}, calling callbacks');
+        print(
+          'DEBUG: Selected server: ${server.deviceName}, calling callbacks',
+        );
       }
     });
-    
+
     // Call callbacks after setState to ensure state is updated first
     if (selectedServer == null) {
       widget.onServerSelected?.call(null);
@@ -449,77 +492,122 @@ class _SyncPageState extends State<SyncPage>
     }
   }
 
-
   Future<ServerConnection> doConnectSelectedServer() async {
-    
-  if (selectedServer == null) return Future.error('No server selected');
+    if (selectedServer == null) return Future.error('No server selected');
 
-  ServerConnection conn = ServerConnection(selectedServer!.ipAddress ?? '', 9922);
-  await conn.connect();
-  
-  // Get device name (will use saved name from database or fallback to system name)
-  String phoneName = await DeviceManager.getLocalDeviceName();
-  
-  await MediaSyncProtocol.sendSyncStart(conn, phoneName);
-  return conn;
+    ServerConnection conn = ServerConnection(
+      selectedServer!.ipAddress ?? '',
+      9922,
+    );
+    await conn.connect();
+
+    // Get device name (will use saved name from database or fallback to system name)
+    String phoneName = await DeviceManager.getLocalDeviceName();
+
+    await MediaSyncProtocol.sendSyncStart(conn, phoneName);
+    return conn;
   }
 
+  final int _chunkSize =
+      5; // Process image assets in small batches (videos always process 1 at a time)
 
-  final int _chunkSize = 5;  // Process image assets in small batches (videos always process 1 at a time)
-
-  Future<void> _syncAssets(RequestType type, String assetType, {ServerConnection? connection}) async {
-    // Don't start a new sync if cancel was requested or user cancelled
-    if (_cancelSync || _userCancelled) {
-      return;
-    }
-    
+  Future<void> _syncAssets(
+    RequestType type,
+    String assetType, {
+    ServerConnection? connection,
+  }) async {
+    if (_cancelSync || _userCancelled) return;
     ServerConnection? conn = connection;
     var createdConn = false;
     try {
-      _cancelSync = false;  // Reset cancel flag
+      _cancelSync = false;
       setState(() {
         _isSyncing = true;
         _syncStatus = 'Connecting to server...';
       });
-
-        if (conn == null) {
+      if (conn == null) {
         conn = await doConnectSelectedServer();
         createdConn = true;
         _activeConn = conn;
-
-        // NOTE: To run reliably in background on Android you should set up
-        // a foreground service (notification) in native code or using a
-        // plugin. This code currently does not start a service automatically
-        // to avoid introducing platform-specific required setup here.
-        // You can enable it by adding a foreground-service plugin and native
-        // manifest changes, or I can implement that for you if you want.
       }
+
+      Future<bool> attemptWithReconnect(
+        Future<bool> Function(ServerConnection) op, {
+        Duration perAttemptTimeout = const Duration(minutes: 3),
+        int maxAttempts = 3,
+      }) async {
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+          if (_cancelSync) return false;
+          // Ensure fresh connection if none or closed
+          if (conn == null || conn!.isClosed) {
+            try {
+              conn?.disconnect();
+            } catch (_) {}
+            try {
+              // Use forceReconnect on retries to clear stuck TCP state
+              if (attempt > 1 && conn != null) {
+                print('[sync] Force reconnecting to clear TCP stack...');
+                await conn!.forceReconnect();
+              } else {
+                conn = await doConnectSelectedServer();
+              }
+              _activeConn = conn;
+            } catch (e) {
+              print('[sync] connect attempt $attempt failed: $e');
+              if (attempt == maxAttempts) return false;
+              await Future.delayed(Duration(milliseconds: 300 * attempt));
+              continue;
+            }
+          }
+          bool ok = false;
+          try {
+            ok = await op(conn!).timeout(
+              perAttemptTimeout,
+              onTimeout: () {
+                print(
+                  '[sync] op timeout attempt=$attempt after ${perAttemptTimeout.inSeconds}s',
+                );
+                return false;
+              },
+            );
+          } catch (e) {
+            print('[sync] op error attempt=$attempt: $e');
+            ok = false;
+          }
+          if (ok) return true;
+          // Mark connection closed and prepare next attempt
+          try {
+            conn!.disconnect();
+          } catch (_) {}
+          conn = null; // force fresh connect next loop
+          if (attempt < maxAttempts) {
+            final backoff = Duration(milliseconds: 1000 * attempt); // Longer backoff to let TCP clear
+            print(
+              '[sync] will retry (attempt ${attempt + 1}/$maxAttempts) after ${backoff.inMilliseconds}ms',
+            );
+            await Future.delayed(backoff);
+          }
+        }
+        return false;
+      }
+
       final assets = await PhotoManager.getAssetListPaged(
         type: type,
         page: 0,
         pageCount: 1000000,
       );
-
-      final int totalCount = assets.length;
-      
+      final totalCount = assets.length;
       setState(() {
         _syncStatus = 'Checking sync status for $totalCount ${assetType}s...';
       });
-      
       final List<AssetEntity> unsyncedAssets = [];
       int skippedFromCache = 0;
-      
-      // Check all files sequentially (getAssetFilename is now very fast)
       for (var i = 0; i < totalCount; i++) {
         if (_cancelSync) break;
-        
         final asset = assets[i];
-        
         try {
           final fileId = await MediaSyncProtocol.getAssetFilename(asset);
-          final isSynced = history.isFileSyncedCached(fileId);
-          
-          if (isSynced) {
+          if (history.isFileSyncedCached(fileId)) {
             skippedFromCache++;
           } else {
             unsyncedAssets.add(asset);
@@ -528,327 +616,184 @@ class _SyncPageState extends State<SyncPage>
           print('Error checking asset ${asset.id}: $e');
           unsyncedAssets.add(asset);
         }
-        
-        // Update progress every 100 items
         if ((i + 1) % 100 == 0) {
           setState(() {
             _syncStatus = 'Checking ${assetType}s: ${i + 1}/$totalCount...';
           });
         }
       }
-      
       if (_cancelSync) {
         _showErrorToast(context, 'Sync cancelled');
         return;
       }
-      
       setState(() {
-        _syncStatus = 'Found ${unsyncedAssets.length} new ${assetType}s to sync (already synced: $skippedFromCache)';
+        _syncStatus =
+            'Found ${unsyncedAssets.length} new ${assetType}s to sync (already synced: $skippedFromCache)';
       });
-      
-      print('Checked $totalCount files, found ${unsyncedAssets.length} unsynced, skipped $skippedFromCache already synced');
-      
+      print(
+        'Checked $totalCount files, found ${unsyncedAssets.length} unsynced, skipped $skippedFromCache',
+      );
       if (unsyncedAssets.isEmpty) {
-        if (mounted) {
-          setState(() {
-            _syncStatus = 'All ${assetType}s already synced!';
-          });
-          await Future.delayed(const Duration(seconds: 2));
-        }
+        setState(() {
+          _syncStatus = 'All ${assetType}s already synced!';
+        });
+        await Future.delayed(const Duration(seconds: 2));
         return;
       }
-
-      // For videos, process one at a time to avoid memory issues
-      // For images, process in chunks for better performance
       final effectiveChunkSize = type == RequestType.video ? 1 : _chunkSize;
-
-      // Process assets in chunks (1 for videos, _chunkSize for images)
       for (var i = 0; i < unsyncedAssets.length; i += effectiveChunkSize) {
         if (_cancelSync) {
           _showErrorToast(context, 'Sync cancelled');
           break;
         }
-
         setState(() {
-          if (type == RequestType.video) {
-            _syncStatus = 'Processing video ${i + 1} of ${unsyncedAssets.length}... (skipped: $skippedFromCache)';
-          } else {
-            _syncStatus = 'Processing ${i + 1} to ${(i + effectiveChunkSize).clamp(0, unsyncedAssets.length)} of ${unsyncedAssets.length} ${assetType}s... (skipped: $skippedFromCache)';
-          }
+          _syncStatus =
+              type == RequestType.video
+                  ? 'Processing video ${i + 1} of ${unsyncedAssets.length}... (skipped: $skippedFromCache)'
+                  : 'Processing ${i + 1} to ${(i + effectiveChunkSize).clamp(0, unsyncedAssets.length)} of ${unsyncedAssets.length} ${assetType}s... (skipped: $skippedFromCache)';
         });
-
         final chunk = unsyncedAssets.skip(i).take(effectiveChunkSize);
-        for (var asset in chunk) {
+        for (final asset in chunk) {
           if (_cancelSync) break;
-
-          // Re-check cancel before heavy work
-          if (_cancelSync) break;
-
-          String? fileId;
+          String fileId;
           try {
-            // Step 1: Get filename WITHOUT loading full file data
-            if (_cancelSync) break;
             fileId = await MediaSyncProtocol.getAssetFilename(asset);
-            print('Filename determined: id: ${asset.id} -> name: $fileId');
-            
-            // Step 2: Double-check if synced (in case it was synced during this run)
-            if (history.isFileSyncedCached(fileId)) {
-              print('Asset $fileId already synced, skipping (file not loaded)');
-              // Reload count from database to ensure accuracy
-              await _loadSyncedCounts();
-              continue;  // Skip already synced assets - saves memory!
+          } catch (e) {
+            print('Filename error: $e');
+            continue;
+          }
+          if (history.isFileSyncedCached(fileId)) {
+            await _loadSyncedCounts();
+            continue;
+          }
+          bool success = false;
+          if (type == RequestType.video) {
+            String mediaType = 'mp4';
+            final dotIndex = fileId.lastIndexOf('.');
+            if (dotIndex != -1 && dotIndex < fileId.length - 1) {
+              mediaType = fileId.substring(dotIndex + 1).toLowerCase();
             }
-
-            bool success = false;
-            
-            // Step 3: For videos, use chunked upload; for images, use regular packet
-            if (type == RequestType.video) {
-              // Videos: Use chunked upload to avoid loading entire file into memory
-              if (_cancelSync) break;
-              print('Starting chunked upload for video: $fileId');
-              
-              // Extract media type from filename
-              String mediaType = 'mp4';
-              final dotIndex = fileId.lastIndexOf('.');
-              if (dotIndex != -1 && dotIndex < fileId.length - 1) {
-                mediaType = fileId.substring(dotIndex + 1).toLowerCase();
-              }
-              
-              success = await MediaSyncProtocol.sendVideoWithChunks(
-                conn,
+            success = await attemptWithReconnect(
+              (c) => MediaSyncProtocol.sendVideoWithChunks(
+                c,
                 asset,
                 fileId,
                 mediaType,
                 shouldCancel: () => _cancelSync,
                 onProgress: (current, total) {
-                  // Update status with chunk progress
                   final progress = (current / total * 100).toStringAsFixed(1);
-                  setState(() {
-                    _syncStatus = 'Uploading video ${i + 1}/${unsyncedAssets.length}: chunk $current/$total ($progress%) (checked: $totalCount)';
-                  });
+                  if (mounted) {
+                    setState(() {
+                      _syncStatus =
+                          'Uploading video ${i + 1}/${unsyncedAssets.length}: chunk $current/$total ($progress%) (checked: $totalCount)';
+                    });
+                  }
                 },
-              );
-              if (_cancelSync) break;
-              print('Chunked upload result for $fileId: $success');
-            } else {
-              // Images: Use regular packet method (they're typically small)
-              if (_cancelSync) break;
-              print('Converting image to packet: ${asset.id}');
-              final packet = await MediaSyncProtocol.assetToPacket(asset);
-              if (_cancelSync) break;
-              print('Packet created for: $fileId');
-
-              print('Sending $assetType $fileId to server...');
-              success = await MediaSyncProtocol.sendPacketWithAck(
-                conn, 
-                packet, 
-                null, // fileId will be extracted from packet
-                () => _cancelSync, // Pass cancel check function
-              );
-              if (_cancelSync) break;
-              print('Server ACK received for $fileId: $success');
-            }
-            
-            // Step 4: Record sync if successful
-            if (success) {
-              await history.recordSync(fileId, assetType);
-              // Reload count from database to ensure accuracy
-              await _loadSyncedCounts();
-              print('Successfully synced $assetType $fileId');
-            } else {
-              print('❌ Server failed to acknowledge $assetType $fileId - marking as failed');
-              if (mounted) {
-                setState(() {
-                  _syncStatus = 'Warning: Failed to sync $fileId';
-                });
-                await Future.delayed(const Duration(seconds: 1));
-              }
-            }
-          } catch (e) {
-            final errorFileId = fileId ?? 'unknown';
-            print('❌ ERROR syncing $assetType (${errorFileId}): $e');
-            print('   Asset ID: ${asset.id}');
-            print('   Asset Type: ${asset.type}');
-            
-            // Determine if this is an iCloud error
-            final errorString = e.toString();
-            final isICloudError = errorString.contains('PHPhotosErrorDomain') || 
-                                  errorString.contains('iCloud') ||
-                                  errorString.contains('not available');
-            
-            // Show error to user with helpful message
-            if (mounted && !_cancelSync) {
-              setState(() {
-                if (isICloudError) {
-                  _syncStatus = 'Skipped: $errorFileId (not downloaded from iCloud)';
-                } else {
-                  _syncStatus = 'Error with file: $errorFileId - skipping';
-                }
-              });
-              await Future.delayed(const Duration(seconds: 2));
-            }
-            // Continue with next asset even if one fails
+              ),
+            );
+          } else {
+            final packet = await MediaSyncProtocol.assetToPacket(asset);
+            success = await attemptWithReconnect(
+              (c) => MediaSyncProtocol.sendPacketWithAck(
+                c,
+                packet,
+                null,
+                () => _cancelSync,
+              ),
+            );
           }
-          
-          // For videos, add extra delay after each video to ensure memory is freed
+          if (success) {
+            await history.recordSync(fileId, assetType);
+            await _loadSyncedCounts();
+            print('Synced $assetType $fileId');
+          } else {
+            print('Failed after retry $assetType $fileId');
+          }
           if (type == RequestType.video && !_cancelSync) {
-            print('Waiting 200ms before next video to free memory...');
             await Future.delayed(const Duration(milliseconds: 200));
           }
         }
-
-        // Small delay between chunks for images only (videos already have per-item delay)
         if (type == RequestType.image && !_cancelSync) {
           await Future.delayed(const Duration(milliseconds: 50));
         }
       }
     } catch (e) {
-      if (!_cancelSync) {  // Don't show error toast if cancelled
-        print('Error in $assetType sync process: $e');
-        _showErrorToast(context, 'Error syncing $assetType: ${e.toString()}');
+      if (!_cancelSync) {
+        print('Error in $assetType sync: $e');
+        _showErrorToast(context, 'Error syncing $assetType: $e');
       }
     } finally {
-      // Send sync complete signal to server if we have a connection and created it
-      // Skip if user cancelled to avoid waiting for timeout
       if (conn != null && createdConn && !_cancelSync) {
         try {
-          print('Sending sync complete signal to server ($assetType, createdConn=$createdConn)...');
-          await MediaSyncProtocol.sendSyncComplete(conn);
-          print('Sync complete signal sent successfully for $assetType');
+          await MediaSyncProtocol.sendSyncComplete(conn!);
         } catch (e) {
-          print('Error sending sync complete for $assetType: $e');
+          print('Sync complete signal failed: $e');
         }
-      } else if (_cancelSync) {
-        print('Skipping sync complete signal (cancelled)');
       }
-      
-      // Close the connection we created
       if (conn != null && createdConn) {
         try {
-          conn.disconnect();
-          print('Connection closed for $assetType');
+          conn!.disconnect();
         } catch (e) {
-          print('Error closing connection for $assetType: $e');
+          print('Disconnect error: $e');
         }
-      } else {
-        print('Skipping connection close for $assetType (conn=$conn, createdConn=$createdConn)');
       }
-      // Clear active connection reference
       _activeConn = null;
-
-      // If you implemented a foreground service, stop it here.
       if (mounted) {
         setState(() {
           _isSyncing = false;
           _syncStatus = null;
-          if (!_userCancelled) {
-            _cancelSync = false;  // Only reset cancel flag if not user-cancelled
-          }
+          if (!_userCancelled) _cancelSync = false;
         });
-        // Check and update device name lock after sync completes
         await _checkDeviceNameLock();
       }
     }
   }
 
   Future<void> doSyncPhotos() async {
-    _userCancelled = false;  // Reset user cancel flag when starting new sync
-    _cancelSync = false;  // Reset cancel flag when starting new sync
+    _userCancelled = false; // Reset user cancel flag when starting new sync
+    _cancelSync = false; // Reset cancel flag when starting new sync
     _activeSyncMode = SyncMode.photos;
     await _syncAssets(RequestType.image, 'photo');
-  }  
-  
+  }
+
   Future<void> doSyncVideos() async {
-    _userCancelled = false;  // Reset user cancel flag when starting new sync
-    _cancelSync = false;  // Reset cancel flag when starting new sync
+    _userCancelled = false; // Reset user cancel flag when starting new sync
+    _cancelSync = false; // Reset cancel flag when starting new sync
     _activeSyncMode = SyncMode.videos;
     await _syncAssets(RequestType.video, 'video');
-  }
-
-  // -----------------------------
-  // Sync Functions
-  // -----------------------------
-    void _showErrorToast(BuildContext context, String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.error_outline, color: Colors.white),
-            const SizedBox(width: 8),
-            Text(message),
-          ],
-        ),
-        duration: const Duration(seconds: 3),
-        backgroundColor: Colors.red.shade800,
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.all(16),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
-      ),
-    );
-  }
-
-  void _showInfoToast(BuildContext context, String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.info_outline, color: Colors.white),
-            const SizedBox(width: 8),
-            Text(message),
-          ],
-        ),
-        duration: const Duration(seconds: 3),
-        backgroundColor: Colors.green.shade700,
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.all(16),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
-      ),
-    );
   }
 
   Future<void> _clearSyncHistory() async {
     // Ask for confirmation
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Clear sync history'),
-        content: const Text('This will delete all sync history and allow re-syncing. Continue?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('Clear sync history'),
+            content: const Text(
+              'This will delete all sync history and allow re-syncing. Continue?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Clear'),
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Clear', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
     );
-
     if (confirmed != true) return;
-
     try {
       await history.clearHistory();
-      await history.loadSyncedFilesCache();  // Reload the cache with empty state
-      await _loadSyncedCounts();  // This will load from database (should be 0 after clear)
-      await _checkDeviceNameLock();  // Unlock device name after clearing history
-      _showInfoToast(context, 'Sync history cleared — you can re-sync now.');
+      await _loadSyncCache(); // refresh cache
+      await _loadSyncedCounts();
+      _showInfoToast(context, 'Sync history cleared');
     } catch (e) {
-      _showErrorToast(context, 'Failed to clear history: ${e.toString()}');
+      _showErrorToast(context, 'Failed to clear history: $e');
     }
-  }
-
-  Future<bool> _checkServerSelected() async {
-    if (selectedServer == null) {
-      _showErrorToast(context, "Please select a server before syncing");
-      return false;
-    }
-    return true;
   }
 
   Future<void> syncPhotos() async {
@@ -880,8 +825,8 @@ class _SyncPageState extends State<SyncPage>
   }
 
   Future<void> syncAll() async {
-    _userCancelled = false;  // Reset user cancel flag when starting new sync
-    _cancelSync = false;  // Reset cancel flag when starting new sync
+    _userCancelled = false; // Reset user cancel flag when starting new sync
+    _cancelSync = false; // Reset cancel flag when starting new sync
     _activeSyncMode = SyncMode.all;
     if (!await _checkServerSelected()) return;
 
@@ -937,7 +882,7 @@ class _SyncPageState extends State<SyncPage>
       if (!_cancelSync && syncedVideos < totalVideos) {
         await _syncAssets(RequestType.video, 'video', connection: conn);
       }
-      
+
       // Send sync complete if not cancelled
       if (!_cancelSync) {
         try {
@@ -949,7 +894,7 @@ class _SyncPageState extends State<SyncPage>
       } else {
         print('Skipping sync complete signal (cancelled)');
       }
-      
+
       try {
         conn.disconnect();
       } catch (_) {}
@@ -961,7 +906,9 @@ class _SyncPageState extends State<SyncPage>
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // Must call super when using AutomaticKeepAliveClientMixin
+    super.build(
+      context,
+    ); // Must call super when using AutomaticKeepAliveClientMixin
     int totalAll = totalPhotos + totalVideos;
     int syncedAll = syncedPhotos + syncedVideos;
 
@@ -971,441 +918,524 @@ class _SyncPageState extends State<SyncPage>
           children: [
             const SizedBox(height: 12),
             Card(
-                margin: const EdgeInsets.symmetric(horizontal: 8),
-                elevation: 2,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      Icon(
-                        _deviceNameLocked ? Icons.lock : Icons.phone_android,
-                        size: 20,
-                        color: Theme.of(context).primaryColor,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        "My Phone Name:",
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).primaryColor,
-                          fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: _deviceNameController,
-                          enabled: !_deviceNameLocked,
-                          readOnly: _deviceNameLocked,
-                          decoration: InputDecoration(
-                            hintText: _deviceNameLocked ? 'Locked after first sync' : 'Enter device name',
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                            isDense: true,
-                            filled: _deviceNameLocked,
-                            fillColor: _deviceNameLocked ? Colors.grey.shade200 : null,
-                          ),
-                          style: const TextStyle(fontSize: 14),
-                          onSubmitted: _deviceNameLocked ? null : _saveDeviceName,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      if (!_deviceNameLocked)
-                        ElevatedButton.icon(
-                          onPressed: () => _saveDeviceName(_deviceNameController.text),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                          icon: const Icon(Icons.save, size: 16),
-                          label: const Text("Save", style: TextStyle(fontSize: 14)),
-                        ),
-                    ],
-                  ),
-                ),
+              margin: const EdgeInsets.symmetric(horizontal: 8),
+              elevation: 2,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
               ),
-            const SizedBox(height: 6),
-            Card(
-                margin: const EdgeInsets.symmetric(horizontal: 8),
-                elevation: 2,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      Icon(Icons.wifi_find,
-                        size: 18,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    Icon(
+                      _deviceNameLocked ? Icons.lock : Icons.phone_android,
+                      size: 20,
+                      color: Theme.of(context).primaryColor,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      "My Phone Name:",
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
                         color: Theme.of(context).primaryColor,
+                        fontSize: 12,
                       ),
-                      const SizedBox(width: 6),
-                      Text(
-                        "Server Discovery",
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).primaryColor,
-                          fontSize: 12,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: _deviceNameController,
+                        enabled: !_deviceNameLocked,
+                        readOnly: _deviceNameLocked,
+                        decoration: InputDecoration(
+                          hintText:
+                              _deviceNameLocked
+                                  ? 'Locked after first sync'
+                                  : 'Enter device name',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          isDense: true,
+                          filled: _deviceNameLocked,
+                          fillColor:
+                              _deviceNameLocked ? Colors.grey.shade200 : null,
                         ),
+                        style: const TextStyle(fontSize: 14),
+                        onSubmitted: _deviceNameLocked ? null : _saveDeviceName,
                       ),
-                      const SizedBox(width: 12),
-                      ElevatedButton(
-                        onPressed: discoverServers,
+                    ),
+                    const SizedBox(width: 8),
+                    if (!_deviceNameLocked)
+                      ElevatedButton.icon(
+                        onPressed:
+                            () => _saveDeviceName(_deviceNameController.text),
                         style: ElevatedButton.styleFrom(
-                          minimumSize: const Size(100, 28),
-                          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 10,
+                          ),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
                         ),
-                        child: const Text("Discover Servers", style: TextStyle(fontSize: 12)),
+                        icon: const Icon(Icons.save, size: 16),
+                        label: const Text(
+                          "Save",
+                          style: TextStyle(fontSize: 14),
+                        ),
                       ),
-                    ],
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Card(
+              margin: const EdgeInsets.symmetric(horizontal: 8),
+              elevation: 2,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.wifi_find,
+                      size: 18,
+                      color: Theme.of(context).primaryColor,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      "Server Discovery",
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).primaryColor,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    ElevatedButton(
+                      onPressed: discoverServers,
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(100, 28),
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 4,
+                          horizontal: 10,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text(
+                        "Discover Servers",
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            if (discoveredServers.isNotEmpty) ...[
+              Card(
+                margin: const EdgeInsets.symmetric(horizontal: 8),
+                elevation: 2,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  side: BorderSide(color: Colors.green.shade400, width: 2),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Column(
+                    children:
+                        discoveredServers.map((server) {
+                          return Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Checkbox(
+                                value:
+                                    selectedServer?.deviceName ==
+                                    server.deviceName,
+                                onChanged: (_) => selectServer(server),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              Text(
+                                server.deviceName,
+                                style: const TextStyle(fontSize: 13),
+                              ),
+                            ],
+                          );
+                        }).toList(),
                   ),
                 ),
               ),
               const SizedBox(height: 6),
-              if (discoveredServers.isNotEmpty) ...[
-                Card(
-                  margin: const EdgeInsets.symmetric(horizontal: 8),
-                  elevation: 2,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    side: BorderSide(
-                      color: Colors.green.shade400,
-                      width: 2,
-                    ),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Column(
-                      children: discoveredServers.map((server) {
-                        return Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
+            ],
+            Card(
+              margin: const EdgeInsets.symmetric(horizontal: 8),
+              elevation: 2,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(10),
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
                           children: [
-                            Checkbox(
-                              value: selectedServer?.deviceName == server.deviceName,
-                              onChanged: (_) => selectServer(server),
-                              visualDensity: VisualDensity.compact,
-                            ),
-                            Text(server.deviceName, style: const TextStyle(fontSize: 13)),
-                          ],
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 6),
-              ],
-              Card(
-                margin: const EdgeInsets.symmetric(horizontal: 8),
-                elevation: 2,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(10),
-                  child: Column(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(Icons.perm_media, 
-                                size: 18,
-                                color: Theme.of(context).primaryColor,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                "Media on Device",
-                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: Theme.of(context).primaryColor,
-                                  fontSize: 15,
-                                ),
-                              ),
-                            ],
-                          ),
-                          IconButton(
-                            onPressed: _loadingMediaCounts ? null : _loadMediaCounts,
-                            icon: Icon(
-                              Icons.refresh_rounded,
+                            Icon(
+                              Icons.perm_media,
                               size: 18,
                               color: Theme.of(context).primaryColor,
                             ),
-                            tooltip: "Refresh Media Count",
-                            style: IconButton.styleFrom(
-                              backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
-                              padding: const EdgeInsets.all(4),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(8),
-                          color: Theme.of(context).primaryColor.withOpacity(0.04),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          children: [
-                            Column(
-                              children: [
-                                Icon(Icons.photo_library, 
-                                  size: 22,
-                                  color: Theme.of(context).primaryColor,
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  totalPhotos.toString(),
-                                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                    color: Theme.of(context).primaryColor,
-                                    fontSize: 18,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  "Photos",
-                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: Colors.black54,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            Container(
-                              height: 40,
-                              width: 1,
-                              color: Colors.black12,
-                            ),
-                            Column(
-                              children: [
-                                Icon(Icons.videocam, 
-                                  size: 22,
-                                  color: Theme.of(context).primaryColor,
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  totalVideos.toString(),
-                                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                    color: Theme.of(context).primaryColor,
-                                    fontSize: 18,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  "Videos",
-                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: Colors.black54,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Card(
-                margin: const EdgeInsets.symmetric(horizontal: 8),
-                elevation: 2,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(10),
-                  child: Column(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).primaryColor.withOpacity(0.04),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Column(
-                          children: [
+                            const SizedBox(width: 4),
                             Text(
-                              "$syncedAll / $totalAll synced",
-                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              "Media on Device",
+                              style: Theme.of(
+                                context,
+                              ).textTheme.titleMedium?.copyWith(
                                 fontWeight: FontWeight.bold,
                                 color: Theme.of(context).primaryColor,
-                                fontSize: 16,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            if (_syncStatus != null) ...[
-                              const SizedBox(height: 4),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: LinearProgressIndicator(
-                                      value: null, // Indeterminate progress
-                                      backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
-                                      valueColor: AlwaysStoppedAnimation<Color>(
-                                        Theme.of(context).primaryColor,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  IconButton(
-                                    onPressed: () {
-                                      setState(() {
-                                        _cancelSync = true;
-                                        _userCancelled = true;  // Mark as user-initiated cancel
-                                        _syncStatus = 'Cancelling sync...';
-                                      });
-                                      // Force-close any active connection to immediately unblock pending I/O
-                                      try {
-                                        _activeConn?.disconnect();
-                                      } catch (_) {}
-                                    },
-                                    icon: const Icon(Icons.stop_circle_outlined),
-                                    color: Colors.red,
-                                    tooltip: 'Stop sync',
-                                    iconSize: 20,
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                _syncStatus!,
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: Theme.of(context).primaryColor,
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                              const SizedBox(height: 4),
-                            ],
-                            ElevatedButton(
-                              onPressed: (_isSyncing || _deviceNameController.text.trim().isEmpty) ? null : syncAll,
-                              style: ElevatedButton.styleFrom(
-                                minimumSize: const Size(120, 32),
-                                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                              ),
-                              child: Text(_isSyncing ? "Syncing..." : "Sync All", style: const TextStyle(fontSize: 14)),
-                            ),
-                            const SizedBox(height: 4),
-                            OutlinedButton(
-                              onPressed: _isSyncing ? null : _clearSyncHistory,
-                              style: OutlinedButton.styleFrom(
-                                minimumSize: const Size(120, 28),
-                                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-                                side: BorderSide(color: Theme.of(context).primaryColor.withOpacity(0.4)),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                              ),
-                              child: Text(
-                                'Clear Sync History',
-                                style: TextStyle(color: Theme.of(context).primaryColor, fontSize: 13),
+                                fontSize: 15,
                               ),
                             ),
                           ],
                         ),
+                        IconButton(
+                          onPressed:
+                              _loadingMediaCounts ? null : _loadMediaCounts,
+                          icon: Icon(
+                            Icons.refresh_rounded,
+                            size: 18,
+                            color: Theme.of(context).primaryColor,
+                          ),
+                          tooltip: "Refresh Media Count",
+                          style: IconButton.styleFrom(
+                            backgroundColor: Theme.of(
+                              context,
+                            ).primaryColor.withOpacity(0.1),
+                            padding: const EdgeInsets.all(4),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        color: Theme.of(context).primaryColor.withOpacity(0.04),
                       ),
-                      const SizedBox(height: 10),
-                      Row(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
                         children: [
-                          Expanded(
-                            child: Column(
-                              children: [
-                                Text(
-                                  "$syncedPhotos / $totalPhotos",
-                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 14,
-                                  ),
+                          Column(
+                            children: [
+                              Icon(
+                                Icons.photo_library,
+                                size: 22,
+                                color: Theme.of(context).primaryColor,
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                totalPhotos.toString(),
+                                style: Theme.of(
+                                  context,
+                                ).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: Theme.of(context).primaryColor,
+                                  fontSize: 18,
                                 ),
-                                const Text("photos", style: TextStyle(fontSize: 12)),
-                                const SizedBox(height: 4),
-                                ElevatedButton(
-                                  onPressed: _isSyncing ? null : syncPhotos,
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
-                                    foregroundColor: Theme.of(context).primaryColor,
-                                    elevation: 0,
-                                    minimumSize: const Size(80, 28),
-                                    padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    _isSyncing ? "Syncing..." : "Sync Photos",
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                                  ),
-                                ),
-                              ],
-                            ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                "Photos",
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(color: Colors.black54),
+                              ),
+                            ],
                           ),
                           Container(
-                            height: 30,
+                            height: 40,
                             width: 1,
                             color: Colors.black12,
                           ),
-                          Expanded(
-                            child: Column(
-                              children: [
-                                Text(
-                                  "$syncedVideos / $totalVideos",
-                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 14,
-                                  ),
+                          Column(
+                            children: [
+                              Icon(
+                                Icons.videocam,
+                                size: 22,
+                                color: Theme.of(context).primaryColor,
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                totalVideos.toString(),
+                                style: Theme.of(
+                                  context,
+                                ).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: Theme.of(context).primaryColor,
+                                  fontSize: 18,
                                 ),
-                                const Text("videos", style: TextStyle(fontSize: 12)),
-                                const SizedBox(height: 4),
-                                ElevatedButton(
-                                  onPressed: _isSyncing ? null : syncVideos,
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
-                                    foregroundColor: Theme.of(context).primaryColor,
-                                    elevation: 0,
-                                    minimumSize: const Size(80, 28),
-                                    padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(8),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                "Videos",
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(color: Colors.black54),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Card(
+              margin: const EdgeInsets.symmetric(horizontal: 8),
+              elevation: 2,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(10),
+                child: Column(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).primaryColor.withOpacity(0.04),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Column(
+                        children: [
+                          Text(
+                            "$syncedAll / $totalAll synced",
+                            style: Theme.of(
+                              context,
+                            ).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: Theme.of(context).primaryColor,
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          if (_syncStatus != null) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: LinearProgressIndicator(
+                                    value: null, // Indeterminate progress
+                                    backgroundColor: Theme.of(
+                                      context,
+                                    ).primaryColor.withOpacity(0.1),
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Theme.of(context).primaryColor,
                                     ),
                                   ),
-                                  child: Text(
-                                    _isSyncing ? "Syncing..." : "Sync Videos",
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                IconButton(
+                                  onPressed: () {
+                                    setState(() {
+                                      _cancelSync = true;
+                                      _userCancelled =
+                                          true; // Mark as user-initiated cancel
+                                      _syncStatus = 'Cancelling sync...';
+                                    });
+                                    // Force-close any active connection to immediately unblock pending I/O
+                                    try {
+                                      _activeConn?.disconnect();
+                                    } catch (_) {}
+                                  },
+                                  icon: const Icon(Icons.stop_circle_outlined),
+                                  color: Colors.red,
+                                  tooltip: 'Stop sync',
+                                  iconSize: 20,
                                 ),
                               ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _syncStatus!,
+                              style: Theme.of(
+                                context,
+                              ).textTheme.bodySmall?.copyWith(
+                                color: Theme.of(context).primaryColor,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 4),
+                          ],
+                          ElevatedButton(
+                            onPressed:
+                                (_isSyncing ||
+                                        _deviceNameController.text
+                                            .trim()
+                                            .isEmpty)
+                                    ? null
+                                    : syncAll,
+                            style: ElevatedButton.styleFrom(
+                              minimumSize: const Size(120, 32),
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 6,
+                                horizontal: 12,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            child: Text(
+                              _isSyncing ? "Syncing..." : "Sync All",
+                              style: const TextStyle(fontSize: 14),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          OutlinedButton(
+                            onPressed: _isSyncing ? null : _clearSyncHistory,
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: const Size(120, 28),
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 4,
+                                horizontal: 8,
+                              ),
+                              side: BorderSide(
+                                color: Theme.of(
+                                  context,
+                                ).primaryColor.withOpacity(0.4),
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            child: Text(
+                              'Clear Sync History',
+                              style: TextStyle(
+                                color: Theme.of(context).primaryColor,
+                                fontSize: 13,
+                              ),
                             ),
                           ),
                         ],
                       ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            children: [
+                              Text(
+                                "$syncedPhotos / $totalPhotos",
+                                style: Theme.of(
+                                  context,
+                                ).textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              const Text(
+                                "photos",
+                                style: TextStyle(fontSize: 12),
+                              ),
+                              const SizedBox(height: 4),
+                              ElevatedButton(
+                                onPressed: _isSyncing ? null : syncPhotos,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Theme.of(
+                                    context,
+                                  ).primaryColor.withOpacity(0.1),
+                                  foregroundColor:
+                                      Theme.of(context).primaryColor,
+                                  elevation: 0,
+                                  minimumSize: const Size(80, 28),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 4,
+                                    horizontal: 8,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                                child: Text(
+                                  _isSyncing ? "Syncing..." : "Sync Photos",
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(height: 30, width: 1, color: Colors.black12),
+                        Expanded(
+                          child: Column(
+                            children: [
+                              Text(
+                                "$syncedVideos / $totalVideos",
+                                style: Theme.of(
+                                  context,
+                                ).textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              const Text(
+                                "videos",
+                                style: TextStyle(fontSize: 12),
+                              ),
+                              const SizedBox(height: 4),
+                              ElevatedButton(
+                                onPressed: _isSyncing ? null : syncVideos,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Theme.of(
+                                    context,
+                                  ).primaryColor.withOpacity(0.1),
+                                  foregroundColor:
+                                      Theme.of(context).primaryColor,
+                                  elevation: 0,
+                                  minimumSize: const Size(80, 28),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 4,
+                                    horizontal: 8,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                                child: Text(
+                                  _isSyncing ? "Syncing..." : "Sync Videos",
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 16),
-            ],
-          ),
+            ),
+            const SizedBox(height: 16),
+          ],
         ),
+      ),
     );
   }
-
 }
