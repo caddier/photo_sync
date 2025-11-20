@@ -208,13 +208,13 @@ class DeviceManager {
       if (wifiName != null && wifiName.isNotEmpty) {
         return wifiName;
       } else {
-        return 'Android Device';
+        return 'AndroidDevice';
       }
     } else if (Platform.isIOS) {
-      return 'iOS Device';
+      return 'IPhoneDevice';
     }
 
     // Default fallback for other platforms
-    return 'Unknown Device';
+    return 'UnknownDevice';
   }
 }
