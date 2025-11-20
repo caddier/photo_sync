@@ -18,6 +18,9 @@ class HttpSyncClient {
   /// Optional rate limit for video uploads (bytes per second). Null = unlimited.
   int? videoUploadRateLimitBytesPerSecond;
 
+  /// Optional rate limit for photo uploads (bytes per second). Null = unlimited.
+  int? photoUploadRateLimitBytesPerSecond;
+
   String get baseUrl => 'http://$serverHost:$serverPort';
 
   HttpSyncClient({
@@ -25,6 +28,7 @@ class HttpSyncClient {
     required this.serverPort,
     http.Client? httpClient,
     this.videoUploadRateLimitBytesPerSecond,
+    this.photoUploadRateLimitBytesPerSecond,
   }) : _httpClient = httpClient ?? http.Client();
 
   /// Get formatted timestamp for logging
@@ -43,9 +47,7 @@ class HttpSyncClient {
   /// Returns true if server is reachable and responding
   Future<bool> testConnection() async {
     try {
-      final response = await _httpClient
-          .get(Uri.parse('$baseUrl/api/ping'))
-          .timeout(const Duration(seconds: 5));
+      final response = await _httpClient.get(Uri.parse('$baseUrl/api/ping')).timeout(const Duration(seconds: 5));
 
       return response.statusCode == 200;
     } catch (e) {
@@ -60,20 +62,14 @@ class HttpSyncClient {
   Future<bool> startSyncSession(String deviceName) async {
     try {
       final response = await _httpClient
-          .post(
-            Uri.parse('$baseUrl/api/sync/start'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({'deviceName': deviceName}),
-          )
+          .post(Uri.parse('$baseUrl/api/sync/start'), headers: {'Content-Type': 'application/json'}, body: jsonEncode({'deviceName': deviceName}))
           .timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
         print('${_timestamp()} Sync session started for device: $deviceName');
         return true;
       } else {
-        print(
-          '${_timestamp()} Failed to start sync session: ${response.statusCode}',
-        );
+        print('${_timestamp()} Failed to start sync session: ${response.statusCode}');
         return false;
       }
     } catch (e) {
@@ -85,9 +81,7 @@ class HttpSyncClient {
   /// End sync session
   Future<void> endSyncSession() async {
     try {
-      await _httpClient
-          .post(Uri.parse('$baseUrl/api/sync/end'))
-          .timeout(const Duration(seconds: 5));
+      await _httpClient.post(Uri.parse('$baseUrl/api/sync/end')).timeout(const Duration(seconds: 5));
 
       print('${_timestamp()} Sync session ended');
     } catch (e) {
@@ -98,9 +92,7 @@ class HttpSyncClient {
   /// Get total media count from server
   Future<int> getMediaCount() async {
     try {
-      final response = await _httpClient
-          .get(Uri.parse('$baseUrl/api/media/count'))
-          .timeout(const Duration(seconds: 10));
+      final response = await _httpClient.get(Uri.parse('$baseUrl/api/media/count')).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -119,31 +111,17 @@ class HttpSyncClient {
   ///
   /// [pageIndex] - Zero-based page number
   /// [pageSize] - Number of items per page
-  Future<List<MediaThumbItem>> getMediaThumbnails({
-    required int pageIndex,
-    required int pageSize,
-  }) async {
+  Future<List<MediaThumbItem>> getMediaThumbnails({required int pageIndex, required int pageSize}) async {
     try {
-      final uri = Uri.parse('$baseUrl/api/media/thumbnails').replace(
-        queryParameters: {
-          'page': pageIndex.toString(),
-          'pageSize': pageSize.toString(),
-        },
-      );
+      final uri = Uri.parse('$baseUrl/api/media/thumbnails').replace(queryParameters: {'page': pageIndex.toString(), 'pageSize': pageSize.toString()});
 
-      final response = await _httpClient
-          .get(uri)
-          .timeout(const Duration(seconds: 30));
+      final response = await _httpClient.get(uri).timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final photos = data['photos'] as List<dynamic>? ?? [];
 
-        return photos
-            .map(
-              (item) => MediaThumbItem.fromJson(item as Map<String, dynamic>),
-            )
-            .toList();
+        return photos.map((item) => MediaThumbItem.fromJson(item as Map<String, dynamic>)).toList();
       }
       return [];
     } catch (e) {
@@ -158,9 +136,7 @@ class HttpSyncClient {
       final totalCount = await getMediaCount();
       if (totalCount == 0) return [];
 
-      print(
-        '${_timestamp()} Fetching all server file IDs (total: $totalCount)...',
-      );
+      print('${_timestamp()} Fetching all server file IDs (total: $totalCount)...');
 
       const pageSize = 100;
       final totalPages = (totalCount / pageSize).ceil();
@@ -168,16 +144,11 @@ class HttpSyncClient {
 
       for (int page = 0; page < totalPages; page++) {
         print('${_timestamp()} Fetching page ${page + 1}/$totalPages...');
-        final thumbList = await getMediaThumbnails(
-          pageIndex: page,
-          pageSize: pageSize,
-        );
+        final thumbList = await getMediaThumbnails(pageIndex: page, pageSize: pageSize);
         allFileIds.addAll(thumbList.map((item) => item.id));
       }
 
-      print(
-        '${_timestamp()} Retrieved ${allFileIds.length} file IDs from server',
-      );
+      print('${_timestamp()} Retrieved ${allFileIds.length} file IDs from server');
       return allFileIds;
     } catch (e) {
       print('${_timestamp()} Error getting all server file IDs: $e');
@@ -204,43 +175,67 @@ class HttpSyncClient {
       return false;
     }
 
-    // Wrap image bytes in a cancellable stream to support mid-flight cancel
-    int bytesSent = 0;
+    // Chunk + throttle image bytes in a cancellable stream to support mid-flight cancel & rate limiting
     final total = imageBytes.length;
-    final source = Stream<List<int>>.value(imageBytes);
-    final cancellable = source.asyncMap((chunk) async {
+    final limit = photoUploadRateLimitBytesPerSecond;
+    const int chunkSize = 64 * 1024; // 64KB chunks for smoother progress & throttling
+    int offset = 0;
+    int bytesSent = 0;
+    final start = DateTime.now();
+    final chunkCount = (total / chunkSize).ceil();
+    final chunks = List<List<int>>.generate(chunkCount, (index) {
+      final remaining = total - offset;
+      final size = remaining < chunkSize ? remaining : chunkSize;
+      final chunk = imageBytes.sublist(offset, offset + size);
+      offset += size;
+      return chunk;
+    });
+    final cancellable = Stream<List<int>>.fromIterable(chunks).asyncMap((chunk) async {
       if (shouldCancel != null && shouldCancel()) {
         throw const _UploadCancelled();
       }
       bytesSent += chunk.length;
       onProgress?.call(bytesSent, total);
+      if (limit != null && limit > 0) {
+        final elapsedMs = DateTime.now().difference(start).inMilliseconds;
+        final expectedMs = (bytesSent / limit) * 1000;
+        final delayMs = expectedMs - elapsedMs;
+        if (delayMs > 5) {
+          int remaining = delayMs.round();
+          while (remaining > 0) {
+            final slice = remaining > 500 ? 500 : remaining;
+            if (shouldCancel != null && shouldCancel()) {
+              throw const _UploadCancelled();
+            }
+            await Future.delayed(Duration(milliseconds: slice));
+            remaining -= slice;
+          }
+        }
+      }
       return chunk;
     });
 
     final ioClient = IOClient(HttpClient());
     try {
-      print(
-        '${_timestamp()} Uploading photo: $fileId (${(imageBytes.length / 1024).toStringAsFixed(2)} KB)',
-      );
+      print('${_timestamp()} Uploading photo: $fileId (${(imageBytes.length / 1024).toStringAsFixed(2)} KB)');
 
-      final request = http.MultipartRequest(
-        'POST',
-        Uri.parse('$baseUrl/api/media/upload/photo'),
-      );
+      final request = http.MultipartRequest('POST', Uri.parse('$baseUrl/api/media/upload/photo'));
 
       // Add file as streaming multipart to allow cancellation
-      request.files.add(
-        http.MultipartFile('file', cancellable, total, filename: fileId),
-      );
+      request.files.add(http.MultipartFile('file', cancellable, total, filename: fileId));
 
       // Add metadata
       request.fields['fileId'] = fileId;
       request.fields['mediaType'] = mediaType;
 
       // Send with timeout using a dedicated client we can close on cancel
-      final streamedResponse = await ioClient
-          .send(request)
-          .timeout(const Duration(seconds: 60));
+      // Adjust timeout when throttling is active
+      Duration timeout = const Duration(seconds: 60);
+      if (limit != null && limit > 0) {
+        final expectedSeconds = (total / limit).ceil();
+        timeout = Duration(seconds: expectedSeconds + 30); // cushion
+      }
+      final streamedResponse = await ioClient.send(request).timeout(timeout);
 
       final response = await http.Response.fromStream(streamedResponse);
       if (response.statusCode == 200) {
@@ -255,9 +250,7 @@ class HttpSyncClient {
           return false;
         }
       }
-      print(
-        '${_timestamp()} Upload failed with status: ${response.statusCode}',
-      );
+      print('${_timestamp()} Upload failed with status: ${response.statusCode}');
       return false;
     } on _UploadCancelled {
       // Aborted by user
@@ -272,9 +265,7 @@ class HttpSyncClient {
         try {
           ioClient.close();
         } catch (_) {}
-        print(
-          '${_timestamp()} Photo upload cancelled (socket closed): $fileId',
-        );
+        print('${_timestamp()} Photo upload cancelled (socket closed): $fileId');
         return false;
       }
       print('${_timestamp()} Error uploading photo: $e');
@@ -306,9 +297,7 @@ class HttpSyncClient {
     try {
       file = await asset.file;
     } catch (e) {
-      print(
-        '${_timestamp()} ❌ Cannot access video file (may be in iCloud): $fileId',
-      );
+      print('${_timestamp()} ❌ Cannot access video file (may be in iCloud): $fileId');
       print('${_timestamp()}    Error: $e');
       return false;
     }
@@ -326,9 +315,7 @@ class HttpSyncClient {
       return false;
     }
 
-    print(
-      '${_timestamp()} Starting video upload: $fileId (${(fileSize / (1024 * 1024)).toStringAsFixed(2)} MB)',
-    );
+    print('${_timestamp()} Starting video upload: $fileId (${(fileSize / (1024 * 1024)).toStringAsFixed(2)} MB)');
 
     // For small videos (< 10MB), use simple upload
     if (fileSize < 10 * 1024 * 1024) {
@@ -389,13 +376,8 @@ class HttpSyncClient {
       return chunk;
     });
     try {
-      final request = http.MultipartRequest(
-        'POST',
-        Uri.parse('$baseUrl/api/media/upload/video'),
-      );
-      request.files.add(
-        http.MultipartFile('file', stream, fileSize, filename: fileId),
-      );
+      final request = http.MultipartRequest('POST', Uri.parse('$baseUrl/api/media/upload/video'));
+      request.files.add(http.MultipartFile('file', stream, fileSize, filename: fileId));
       request.fields['fileId'] = fileId;
       request.fields['mediaType'] = mediaType;
 
@@ -441,10 +423,7 @@ class HttpSyncClient {
     final ioClient = IOClient(HttpClient());
     try {
       // Create multipart request
-      final request = http.MultipartRequest(
-        'POST',
-        Uri.parse('$baseUrl/api/media/upload/video'),
-      );
+      final request = http.MultipartRequest('POST', Uri.parse('$baseUrl/api/media/upload/video'));
 
       // Add metadata fields
       request.fields['fileId'] = fileId;
@@ -482,9 +461,7 @@ class HttpSyncClient {
         }
         return chunk;
       });
-      request.files.add(
-        http.MultipartFile('file', fileStream, fileSize, filename: fileId),
-      );
+      request.files.add(http.MultipartFile('file', fileStream, fileSize, filename: fileId));
 
       print('${_timestamp()} Uploading large video via HTTP streaming...');
 
@@ -495,9 +472,7 @@ class HttpSyncClient {
         // Add generous cushion beyond expected throttled duration
         timeoutSeconds = expectedSeconds + 120;
       }
-      final streamedResponse = await ioClient
-          .send(request)
-          .timeout(Duration(seconds: timeoutSeconds));
+      final streamedResponse = await ioClient.send(request).timeout(Duration(seconds: timeoutSeconds));
 
       final response = await http.Response.fromStream(streamedResponse);
 
@@ -509,15 +484,11 @@ class HttpSyncClient {
           print('${_timestamp()} Large video uploaded successfully: $fileId');
           return true;
         } else {
-          print(
-            '${_timestamp()} Server rejected video: ${data['message'] ?? 'Unknown error'}',
-          );
+          print('${_timestamp()} Server rejected video: ${data['message'] ?? 'Unknown error'}');
           return false;
         }
       } else {
-        print(
-          '${_timestamp()} Upload failed with status: ${response.statusCode}',
-        );
+        print('${_timestamp()} Upload failed with status: ${response.statusCode}');
         return false;
       }
     } on _UploadCancelled {
@@ -531,9 +502,7 @@ class HttpSyncClient {
         try {
           ioClient.close();
         } catch (_) {}
-        print(
-          '${_timestamp()} Large video upload cancelled (socket closed): $fileId',
-        );
+        print('${_timestamp()} Large video upload cancelled (socket closed): $fileId');
         return false;
       }
       print('${_timestamp()} Error uploading large video: $e');
@@ -553,11 +522,7 @@ class HttpSyncClient {
 
     try {
       final response = await _httpClient
-          .post(
-            Uri.parse('$baseUrl/api/media/delete'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({'fileIds': fileIds}),
-          )
+          .post(Uri.parse('$baseUrl/api/media/delete'), headers: {'Content-Type': 'application/json'}, body: jsonEncode({'fileIds': fileIds}))
           .timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
@@ -593,44 +558,19 @@ class MediaThumbItem {
   final String media; // file extension
   final bool isVideo;
 
-  MediaThumbItem({
-    required this.id,
-    required this.thumbData,
-    required this.media,
-    required this.isVideo,
-  });
+  MediaThumbItem({required this.id, required this.thumbData, required this.media, required this.isVideo});
 
   factory MediaThumbItem.fromJson(Map<String, dynamic> json) {
     final mediaType = json['media'] as String? ?? '';
     final isVideo = _isVideoMediaType(mediaType);
 
-    return MediaThumbItem(
-      id: json['id'] as String,
-      thumbData: json['data'] as String? ?? '',
-      media: mediaType,
-      isVideo: isVideo,
-    );
+    return MediaThumbItem(id: json['id'] as String, thumbData: json['data'] as String? ?? '', media: mediaType, isVideo: isVideo);
   }
 
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'data': thumbData,
-    'media': media,
-  };
+  Map<String, dynamic> toJson() => {'id': id, 'data': thumbData, 'media': media};
 
   static bool _isVideoMediaType(String media) {
-    const videoTypes = {
-      'mp4',
-      'mov',
-      'avi',
-      'wmv',
-      '3gp',
-      '3g2',
-      'mkv',
-      'webm',
-      'flv',
-      'video',
-    };
+    const videoTypes = {'mp4', 'mov', 'avi', 'wmv', '3gp', '3g2', 'mkv', 'webm', 'flv', 'video'};
     return videoTypes.contains(media.toLowerCase());
   }
 }
