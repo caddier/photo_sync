@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:photo_sync/device_finder.dart';
-import 'package:photo_sync/server_conn.dart';
+import 'package:photo_sync/http_sync_client.dart';
+import 'package:photo_sync/media_transport.dart';
+// QUIC disabled: using pure HTTP transport
+import 'package:photo_sync/http_media_sync_protocol.dart';
 import 'package:photo_sync/sync_history.dart';
 import 'package:photo_sync/media_eumerator.dart';
-import 'package:photo_sync/media_sync_protocol.dart';
 import 'package:photo_sync/server_tab.dart';
 import 'package:photo_sync/phone_tab.dart';
 import 'package:photo_manager/photo_manager.dart';
@@ -12,11 +14,15 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 //dart:io will be used if/when we add platform-specific foreground service code
 // import 'dart:io' show Platform;
 
+// Optional: global video upload throttling (bytes per second). Set null for unlimited.
+const int kVideoUploadRateLimitBytesPerSecond = 10 * 1024 * 1024; // 10 MB/s
+
 // Optional: foreground service on Android. Native setup required in AndroidManifest.
 // import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // QUIC disabled: no flutter_quic initialization
   // Enable wakelock to keep screen on during app usage
   await WakelockPlus.enable();
   runApp(const MainApp());
@@ -345,9 +351,9 @@ class _SyncPageState extends State<SyncPage>
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached) {
-      // In case of backgrounding during sync, force-close active connection so awaits unblock
+      // In case of backgrounding during sync, force-close active HTTP client so awaits unblock
       try {
-        _activeConn?.disconnect();
+        _activeClient?.close();
       } catch (_) {}
     }
   }
@@ -417,8 +423,7 @@ class _SyncPageState extends State<SyncPage>
   String? _syncStatus;
   bool _cancelSync = false; // Flag to cancel ongoing sync
   bool _userCancelled = false; // Flag to track user-initiated cancellation
-  ServerConnection?
-  _activeConn; // Currently active connection for sync (to force-cancel)
+  MediaTransportClient? _activeClient; // Active transport client (HTTP or QUIC)
 
   // Device name state
   final TextEditingController _deviceNameController = TextEditingController();
@@ -492,20 +497,28 @@ class _SyncPageState extends State<SyncPage>
     }
   }
 
-  Future<ServerConnection> doConnectSelectedServer() async {
+  // QUIC disabled: always use HTTP transport
+  Future<MediaTransportClient> doConnectSelectedServer() async {
     if (selectedServer == null) return Future.error('No server selected');
-
-    ServerConnection conn = ServerConnection(
-      selectedServer!.ipAddress ?? '',
-      9922,
+    final host = selectedServer!.ipAddress ?? '';
+    MediaTransportClient transport;
+    print('[transport] Using HTTP transport...');
+    final httpClient = HttpTransportClient(
+      HttpSyncClient(
+        serverHost: host,
+        serverPort: 8080,
+        videoUploadRateLimitBytesPerSecond: kVideoUploadRateLimitBytesPerSecond,
+      ),
     );
-    await conn.connect();
-
-    // Get device name (will use saved name from database or fallback to system name)
+    final ok = await httpClient.testConnection();
+    if (!ok) {
+      httpClient.close();
+      throw Exception('Failed to connect via HTTP');
+    }
+    transport = httpClient;
     String phoneName = await DeviceManager.getLocalDeviceName();
-
-    await MediaSyncProtocol.sendSyncStart(conn, phoneName);
-    return conn;
+    await transport.startSyncSession(phoneName);
+    return transport;
   }
 
   final int _chunkSize =
@@ -514,44 +527,35 @@ class _SyncPageState extends State<SyncPage>
   Future<void> _syncAssets(
     RequestType type,
     String assetType, {
-    ServerConnection? connection,
+    MediaTransportClient? connection,
   }) async {
     if (_cancelSync || _userCancelled) return;
-    ServerConnection? conn = connection;
-    var createdConn = false;
+    MediaTransportClient? client = connection;
+    var createdClient = false;
     try {
       _cancelSync = false;
       setState(() {
         _isSyncing = true;
         _syncStatus = 'Connecting to server...';
       });
-      if (conn == null) {
-        conn = await doConnectSelectedServer();
-        createdConn = true;
-        _activeConn = conn;
+      if (client == null) {
+        client = await doConnectSelectedServer();
+        createdClient = true;
+        _activeClient = client;
       }
 
       Future<bool> attemptWithReconnect(
-        Future<bool> Function(ServerConnection) op, {
+        Future<bool> Function(MediaTransportClient) op, {
         Duration perAttemptTimeout = const Duration(minutes: 3),
         int maxAttempts = 3,
       }) async {
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
           if (_cancelSync) return false;
-          // Ensure fresh connection if none or closed
-          if (conn == null || conn!.isClosed) {
+          // Ensure fresh connection if none exists
+          if (client == null) {
             try {
-              conn?.disconnect();
-            } catch (_) {}
-            try {
-              // Use forceReconnect on retries to clear stuck TCP state
-              if (attempt > 1 && conn != null) {
-                print('[sync] Force reconnecting to clear TCP stack...');
-                await conn!.forceReconnect();
-              } else {
-                conn = await doConnectSelectedServer();
-              }
-              _activeConn = conn;
+              client = await doConnectSelectedServer();
+              _activeClient = client;
             } catch (e) {
               print('[sync] connect attempt $attempt failed: $e');
               if (attempt == maxAttempts) return false;
@@ -561,7 +565,7 @@ class _SyncPageState extends State<SyncPage>
           }
           bool ok = false;
           try {
-            ok = await op(conn!).timeout(
+            ok = await op(client!).timeout(
               perAttemptTimeout,
               onTimeout: () {
                 print(
@@ -575,13 +579,16 @@ class _SyncPageState extends State<SyncPage>
             ok = false;
           }
           if (ok) return true;
-          // Mark connection closed and prepare next attempt
+          // Mark connection as needing refresh for next attempt
+          // Only actively close HTTP transport; for QUIC avoid disposing shared Rust objects mid-sync.
           try {
-            conn!.disconnect();
+            if (client is HttpTransportClient) {
+              client?.close();
+            }
           } catch (_) {}
-          conn = null; // force fresh connect next loop
+          client = null; // force fresh connect next loop
           if (attempt < maxAttempts) {
-            final backoff = Duration(milliseconds: 1000 * attempt); // Longer backoff to let TCP clear
+            final backoff = Duration(milliseconds: 1000 * attempt);
             print(
               '[sync] will retry (attempt ${attempt + 1}/$maxAttempts) after ${backoff.inMilliseconds}ms',
             );
@@ -606,7 +613,7 @@ class _SyncPageState extends State<SyncPage>
         if (_cancelSync) break;
         final asset = assets[i];
         try {
-          final fileId = await MediaSyncProtocol.getAssetFilename(asset);
+          final fileId = await HttpMediaSyncProtocol.getAssetFilename(asset);
           if (history.isFileSyncedCached(fileId)) {
             skippedFromCache++;
           } else {
@@ -657,7 +664,9 @@ class _SyncPageState extends State<SyncPage>
           if (_cancelSync) break;
           String fileId;
           try {
-            fileId = await MediaSyncProtocol.getAssetFilename(asset);
+            fileId = await HttpMediaSyncProtocol.getAssetFilename(
+              asset,
+            ); // still reuse filename logic
           } catch (e) {
             print('Filename error: $e');
             continue;
@@ -668,39 +677,28 @@ class _SyncPageState extends State<SyncPage>
           }
           bool success = false;
           if (type == RequestType.video) {
-            String mediaType = 'mp4';
-            final dotIndex = fileId.lastIndexOf('.');
-            if (dotIndex != -1 && dotIndex < fileId.length - 1) {
-              mediaType = fileId.substring(dotIndex + 1).toLowerCase();
-            }
-            success = await attemptWithReconnect(
-              (c) => MediaSyncProtocol.sendVideoWithChunks(
-                c,
-                asset,
-                fileId,
-                mediaType,
+            success = await attemptWithReconnect((c) async {
+              return c.uploadVideo(
+                asset: asset,
                 shouldCancel: () => _cancelSync,
                 onProgress: (current, total) {
                   final progress = (current / total * 100).toStringAsFixed(1);
                   if (mounted) {
                     setState(() {
                       _syncStatus =
-                          'Uploading video ${i + 1}/${unsyncedAssets.length}: chunk $current/$total ($progress%) (checked: $totalCount)';
+                          'Uploading video ${i + 1}/${unsyncedAssets.length}: $progress% (checked: $totalCount)';
                     });
                   }
                 },
-              ),
-            );
+              );
+            });
           } else {
-            final packet = await MediaSyncProtocol.assetToPacket(asset);
-            success = await attemptWithReconnect(
-              (c) => MediaSyncProtocol.sendPacketWithAck(
-                c,
-                packet,
-                null,
-                () => _cancelSync,
-              ),
-            );
+            success = await attemptWithReconnect((c) async {
+              return c.uploadPhoto(
+                asset: asset,
+                shouldCancel: () => _cancelSync,
+              );
+            });
           }
           if (success) {
             await history.recordSync(fileId, assetType);
@@ -723,21 +721,22 @@ class _SyncPageState extends State<SyncPage>
         _showErrorToast(context, 'Error syncing $assetType: $e');
       }
     } finally {
-      if (conn != null && createdConn && !_cancelSync) {
+      if (client != null && createdClient && !_cancelSync) {
         try {
-          await MediaSyncProtocol.sendSyncComplete(conn!);
+          await client!.endSyncSession();
         } catch (e) {
-          print('Sync complete signal failed: $e');
+          print('End sync session failed: $e');
         }
       }
-      if (conn != null && createdConn) {
+      if (client != null && createdClient) {
         try {
-          conn!.disconnect();
+          // Safe close; QUIC close is lightweight (we skip mid-attempt disposal above).
+          client!.close();
         } catch (e) {
-          print('Disconnect error: $e');
+          print('Close client error: $e');
         }
       }
-      _activeConn = null;
+      _activeClient = null;
       if (mounted) {
         setState(() {
           _isSyncing = false;
@@ -840,29 +839,11 @@ class _SyncPageState extends State<SyncPage>
     await _loadSyncedCounts();
 
     try {
-      var conn = await doConnectSelectedServer();
-      // Reuse the same connection for both photo and video sync to avoid multiple TCP connections
-      await _syncAssets(RequestType.image, 'photo', connection: conn);
+      // Use separate connections per media type to avoid reusing disposed QUIC resources.
+      await _syncAssets(RequestType.image, 'photo');
       if (!_cancelSync) {
-        await _syncAssets(RequestType.video, 'video', connection: conn);
+        await _syncAssets(RequestType.video, 'video');
       }
-
-      // Send sync complete if not cancelled
-      if (!_cancelSync) {
-        try {
-          print('Sending sync complete signal to server (syncAll)...');
-          await MediaSyncProtocol.sendSyncComplete(conn);
-        } catch (e) {
-          print('Error sending sync complete: $e');
-        }
-      } else {
-        print('Skipping sync complete signal (cancelled)');
-      }
-
-      // Close connection after done
-      try {
-        conn.disconnect();
-      } catch (_) {}
     } catch (e) {
       _showErrorToast(context, 'Error during sync: ${e.toString()}');
       print('Error in sync all: $e');
@@ -875,29 +856,12 @@ class _SyncPageState extends State<SyncPage>
     // Load current counts from database before resuming
     await _loadSyncedCounts();
     try {
-      var conn = await doConnectSelectedServer();
       if (syncedPhotos < totalPhotos) {
-        await _syncAssets(RequestType.image, 'photo', connection: conn);
+        await _syncAssets(RequestType.image, 'photo');
       }
       if (!_cancelSync && syncedVideos < totalVideos) {
-        await _syncAssets(RequestType.video, 'video', connection: conn);
+        await _syncAssets(RequestType.video, 'video');
       }
-
-      // Send sync complete if not cancelled
-      if (!_cancelSync) {
-        try {
-          print('Sending sync complete signal to server (resumeSyncAll)...');
-          await MediaSyncProtocol.sendSyncComplete(conn);
-        } catch (e) {
-          print('Error sending sync complete: $e');
-        }
-      } else {
-        print('Skipping sync complete signal (cancelled)');
-      }
-
-      try {
-        conn.disconnect();
-      } catch (_) {}
     } catch (e) {
       _showErrorToast(context, 'Error resuming sync: ${e.toString()}');
       print('Error in _resumeSyncAll: $e');
@@ -1128,19 +1092,22 @@ class _SyncPageState extends State<SyncPage>
                     ),
                     const SizedBox(height: 12),
                     Container(
-                      padding: const EdgeInsets.all(8),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 12,
+                        horizontal: 16,
+                      ),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(8),
                         color: Theme.of(context).primaryColor.withOpacity(0.04),
                       ),
                       child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
                           Column(
                             children: [
                               Icon(
                                 Icons.photo_library,
-                                size: 22,
+                                size: 26,
                                 color: Theme.of(context).primaryColor,
                               ),
                               const SizedBox(height: 6),
@@ -1151,19 +1118,19 @@ class _SyncPageState extends State<SyncPage>
                                 ).textTheme.titleMedium?.copyWith(
                                   fontWeight: FontWeight.bold,
                                   color: Theme.of(context).primaryColor,
-                                  fontSize: 18,
+                                  fontSize: 20,
                                 ),
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                "Photos",
+                                'Photos',
                                 style: Theme.of(context).textTheme.bodySmall
                                     ?.copyWith(color: Colors.black54),
                               ),
                             ],
                           ),
                           Container(
-                            height: 40,
+                            height: 50,
                             width: 1,
                             color: Colors.black12,
                           ),
@@ -1171,7 +1138,7 @@ class _SyncPageState extends State<SyncPage>
                             children: [
                               Icon(
                                 Icons.videocam,
-                                size: 22,
+                                size: 26,
                                 color: Theme.of(context).primaryColor,
                               ),
                               const SizedBox(height: 6),
@@ -1182,12 +1149,12 @@ class _SyncPageState extends State<SyncPage>
                                 ).textTheme.titleMedium?.copyWith(
                                   fontWeight: FontWeight.bold,
                                   color: Theme.of(context).primaryColor,
-                                  fontSize: 18,
+                                  fontSize: 20,
                                 ),
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                "Videos",
+                                'Videos',
                                 style: Theme.of(context).textTheme.bodySmall
                                     ?.copyWith(color: Colors.black54),
                               ),
@@ -1254,9 +1221,9 @@ class _SyncPageState extends State<SyncPage>
                                           true; // Mark as user-initiated cancel
                                       _syncStatus = 'Cancelling sync...';
                                     });
-                                    // Force-close any active connection to immediately unblock pending I/O
+                                    // Force-close any active HTTP client to immediately unblock pending I/O
                                     try {
-                                      _activeConn?.disconnect();
+                                      _activeClient?.close();
                                     } catch (_) {}
                                   },
                                   icon: const Icon(Icons.stop_circle_outlined),

@@ -116,6 +116,12 @@ class MediaPacket {
 }
 
 class MediaSyncProtocol {
+  /// Get formatted timestamp for logging
+  static String _timestamp() {
+    final now = DateTime.now();
+    return '[${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}.${(now.millisecond ~/ 10).toString().padLeft(2, '0')}]';
+  }
+
   /// Get filename for an asset without loading the full file data
   /// This is useful for checking sync history before expensive file operations
   static Future<String> getAssetFilename(AssetEntity asset) async {
@@ -152,7 +158,7 @@ class MediaSyncProtocol {
     AssetEntity asset,
     AssetData assetData,
   ) async {
-    print('Processing video asset: ${assetData.id}');
+    print('${_timestamp()} Processing video asset: ${assetData.id}');
 
     // This method now returns a dummy packet - actual upload is handled by sendVideoWithChunks
     // Extract media type from filename extension
@@ -184,26 +190,24 @@ class MediaSyncProtocol {
     bool Function()? shouldCancel,
     void Function(int current, int total)? onProgress,
   }) async {
-    // Chunk size: 2MB per chunk (smaller to prevent OS buffer overflow)
-    // Larger chunks were causing netstat Send-Q to fill up
-    const int chunkSize = 2 * 1024 * 1024; // 2MB
-
     // Get file handle with error handling for iCloud/unavailable files
     File? file;
     try {
       file = await asset.file;
     } catch (e) {
       print(
-        '❌ Cannot access video file (may be in iCloud or corrupted): $fileId',
+        '${_timestamp()} ❌ Cannot access video file (may be in iCloud or corrupted): $fileId',
       );
-      print('   Error: $e');
+      print('${_timestamp()}    Error: $e');
       return false;
     }
 
     if (file == null || !file.existsSync()) {
-      print('❌ Video file not found or not downloaded locally: $fileId');
       print(
-        '   This file may be stored in iCloud. Please ensure it is downloaded to your device.',
+        '${_timestamp()} ❌ Video file not found or not downloaded locally: $fileId',
+      );
+      print(
+        '${_timestamp()}    This file may be stored in iCloud. Please ensure it is downloaded to your device.',
       );
       return false;
     }
@@ -212,99 +216,125 @@ class MediaSyncProtocol {
     try {
       fileSize = await file.length();
     } catch (e) {
-      print('❌ Cannot read video file size: $fileId');
-      print('   Error: $e');
+      print('${_timestamp()} ❌ Cannot read video file size: $fileId');
+      print('${_timestamp()}    Error: $e');
       return false;
     }
 
-    final totalChunks = (fileSize / chunkSize).ceil();
-
     print(
-      'Starting chunked upload for $fileId: ${(fileSize / (1024 * 1024)).toStringAsFixed(2)} MB in $totalChunks chunks',
+      '${_timestamp()} Starting chunked upload for $fileId: ${(fileSize / (1024 * 1024)).toStringAsFixed(2)} MB',
     );
 
-    // Step 1: Send start packet
+    // Step 1: Send start packet and measure RTT
     final startPacket = PacketEnc(
       MediaSyncPacketType.chunkedVideoStart,
       utf8.encode(
-        jsonEncode({
-          'id': fileId,
-          'media': mediaType,
-          'totalSize': fileSize,
-          'chunkSize': chunkSize,
-          'totalChunks': totalChunks,
-        }),
+        jsonEncode({'id': fileId, 'media': mediaType, 'totalSize': fileSize}),
       ),
     );
 
+    int startRttMs = 0;
     try {
       final encoded = startPacket.encode();
+      final startTime = DateTime.now();
       await conn.sendData(encoded);
 
-      // Wait for start acknowledgment
+      // Wait for start acknowledgment and measure RTT
       final startResponse = await waitForResponse(
         conn,
         timeout: const Duration(seconds: 10),
         shouldCancel: shouldCancel,
       );
+      startRttMs = DateTime.now().difference(startTime).inMilliseconds;
+
       final startResponseStr = utf8.decode(startResponse.data);
       if (!startResponseStr.contains('OK:START')) {
-        print('Server did not acknowledge chunked upload start');
+        print(
+          '${_timestamp()} Server did not acknowledge chunked upload start',
+        );
         return false;
       }
-      print('Server acknowledged chunked upload start');
+      print('${_timestamp()} Server acknowledged start, RTT=${startRttMs}ms');
     } catch (e) {
-      print('Error sending chunked upload start: $e');
+      print('${_timestamp()} Error sending chunked upload start: $e');
       return false;
     }
 
-    // Step 2: Send chunks
+    // Step 2: Send chunks with adaptive sizing
+    // Start with 1024 bytes, increase by 512 bytes each time if RTT < 100ms
+    int currentChunkSize = 1024; // Start at 1KB
+    const int chunkIncrement = 512; // Increase by 512 bytes
+    const int targetRttMs = 100; // Target RTT threshold
+    bool chunkSizeStabilized = false;
+
     final fileHandle = await file.open();
     try {
-      for (int chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+      int chunkIndex = 0;
+      int position = 0;
+
+      while (position < fileSize) {
         // Check for cancellation
         if (shouldCancel != null && shouldCancel()) {
-          print('Chunked upload cancelled at chunk $chunkIndex');
+          print(
+            '${_timestamp()} Chunked upload cancelled at chunk $chunkIndex',
+          );
           await fileHandle.close();
           return false;
         }
 
-        // Calculate chunk bounds
-        final startByte = chunkIndex * chunkSize;
-        final endByte = ((chunkIndex + 1) * chunkSize).clamp(0, fileSize);
-        final currentChunkSize = endByte - startByte;
+        // Adjust chunk size for last chunk
+        final actualChunkSize =
+            (position + currentChunkSize > fileSize)
+                ? fileSize - position
+                : currentChunkSize;
+
+        final startByte = position;
+        final endByte = position + actualChunkSize;
 
         // Read chunk from file
         await fileHandle.setPosition(startByte);
-        final chunkBytes = await fileHandle.read(currentChunkSize);
+        final chunkBytes = await fileHandle.read(actualChunkSize);
 
         // Encode chunk to base64
         final base64Chunk = base64Encode(chunkBytes);
 
-        // Create chunk packet
+        // Create chunk packet with size field
         final chunkPacket = PacketEnc(
           MediaSyncPacketType.chunkedVideoData,
           utf8.encode(
             jsonEncode({
               'id': fileId,
               'chunkIndex': chunkIndex,
+              'size': actualChunkSize,
               'data': base64Chunk,
             }),
           ),
         );
 
         print(
-          'Sending chunk $chunkIndex/${totalChunks - 1} (${(currentChunkSize / 1024).toStringAsFixed(1)} KB)',
+          '${_timestamp()} Sending chunk $chunkIndex (${(actualChunkSize / 1024).toStringAsFixed(1)} KB, pos=$endByte/$fileSize)',
         );
 
         // Send chunk and wait for ACK
+        int chunkRttMs = 0;
         try {
           final encodedChunk = chunkPacket.encode();
-          await conn.sendData(encodedChunk);
+          final sendStart = DateTime.now();
 
-          // Calculate timeout based on chunk size (1.5s per MB)
-          final chunkSizeMB = currentChunkSize / (1024 * 1024);
-          final timeoutSeconds = (10 + chunkSizeMB * 1.5).ceil().clamp(10, 60);
+          await conn
+              .sendData(encodedChunk)
+              .timeout(
+                const Duration(seconds: 20),
+                onTimeout:
+                    () =>
+                        throw TimeoutException(
+                          'sendData stuck (chunk $chunkIndex, ${(actualChunkSize / 1024).round()}KB)',
+                        ),
+              );
+
+          // Wait for ACK
+          final chunkSizeMB = actualChunkSize / (1024 * 1024);
+          final timeoutSeconds = (5 + chunkSizeMB * 0.5).ceil().clamp(5, 20);
           final timeout = Duration(seconds: timeoutSeconds);
 
           final chunkResponse = await waitForResponse(
@@ -312,32 +342,55 @@ class MediaSyncProtocol {
             timeout: timeout,
             shouldCancel: shouldCancel,
           );
+
+          chunkRttMs = DateTime.now().difference(sendStart).inMilliseconds;
           final chunkResponseStr = utf8.decode(chunkResponse.data);
+
           if (!chunkResponseStr.contains('OK:CHUNK:$chunkIndex')) {
-            print('Server did not acknowledge chunk $chunkIndex');
+            print(
+              '${_timestamp()} Server did not acknowledge chunk $chunkIndex',
+            );
             await fileHandle.close();
             return false;
           }
 
           // Progress update
-          final progress = ((chunkIndex + 1) / totalChunks * 100)
-              .toStringAsFixed(1);
-          print('Chunk $chunkIndex ACK received - Progress: $progress%');
+          final progress = (endByte / fileSize * 100).toStringAsFixed(1);
+          print(
+            '${_timestamp()} Chunk $chunkIndex ACK ok (RTT=${chunkRttMs}ms, size=${(actualChunkSize / 1024).toStringAsFixed(1)}KB, progress=$progress%)',
+          );
 
           // Notify progress callback
           if (onProgress != null) {
-            onProgress(chunkIndex + 1, totalChunks);
+            onProgress(endByte, fileSize);
+          }
+
+          // Adjust chunk size based on RTT
+          if (!chunkSizeStabilized) {
+            if (chunkRttMs < targetRttMs) {
+              // RTT is good, increase chunk size
+              currentChunkSize += chunkIncrement;
+              print(
+                '${_timestamp()} RTT < ${targetRttMs}ms, increasing chunk size to ${(currentChunkSize / 1024).toStringAsFixed(1)}KB',
+              );
+            } else {
+              // RTT reached threshold, stabilize at current size
+              chunkSizeStabilized = true;
+              print(
+                '${_timestamp()} RTT reached ${targetRttMs}ms threshold, stabilizing chunk size at ${(currentChunkSize / 1024).toStringAsFixed(1)}KB',
+              );
+            }
           }
         } catch (e) {
-          print('Error sending chunk $chunkIndex: $e');
+          print('${_timestamp()} Error sending chunk $chunkIndex: $e');
           await fileHandle.close();
           return false;
         }
 
-        // CRITICAL: Wait longer between chunks to let OS send buffer drain
-        // Each chunk is ~10MB, network needs time to transmit it
-        // This prevents netstat Send-Q from filling up
-        await Future.delayed(const Duration(milliseconds: 500));
+        // Small pacing delay
+        await Future.delayed(const Duration(milliseconds: 50));
+        position = endByte;
+        chunkIndex++;
       }
     } finally {
       await fileHandle.close();
@@ -346,7 +399,7 @@ class MediaSyncProtocol {
     // Step 3: Send complete packet
     final completePacket = PacketEnc(
       MediaSyncPacketType.chunkedVideoComplete,
-      utf8.encode(jsonEncode({'id': fileId, 'totalChunks': totalChunks})),
+      utf8.encode(jsonEncode({'id': fileId, 'totalBytes': fileSize})),
     );
 
     try {
@@ -369,7 +422,7 @@ class MediaSyncProtocol {
         return false;
       }
     } catch (e) {
-      print('Error sending chunked upload complete: $e');
+      print('${_timestamp()} Error sending chunked upload complete: $e');
       return false;
     }
   }
@@ -392,7 +445,9 @@ class MediaSyncProtocol {
           );
         }
       } catch (e) {
-        print('Failed to read video file for format detection: $e');
+        print(
+          '${_timestamp()} Failed to read video file for format detection: $e',
+        );
       }
 
       // Fallback: try originBytes but only take first 12 bytes
@@ -416,7 +471,9 @@ class MediaSyncProtocol {
 
     // Use the centralized filename generation function
     final filename = await getAssetFilename(asset);
-    print('Prepared filename for asset: $filename asset.type=${asset.type}');
+    print(
+      '${_timestamp()} Prepared filename for asset: $filename asset.type=${asset.type}',
+    );
 
     // For videos, don't pass the bytes to isolate (just filename info)
     // For images, pass the full bytes
@@ -436,7 +493,9 @@ class MediaSyncProtocol {
     }
 
     final bytes = data.bytes!;
-    print('Processing asset: ${data.id}, bytes length: ${bytes.length}');
+    print(
+      '${_timestamp()} Processing asset: ${data.id}, bytes length: ${bytes.length}',
+    );
     // Convert to base64
     final base64Data = base64Encode(bytes);
 
@@ -466,7 +525,7 @@ class MediaSyncProtocol {
   }
 
   /// Send packet and wait for acknowledgment
-  static Future<bool> sendPacketWithAck(
+  static Future<bool> sendPacketWaitAck(
     ServerConnection conn,
     PacketEnc packet, [
     String? fileId,
@@ -474,9 +533,26 @@ class MediaSyncProtocol {
   ]) async {
     // Fast abort if connection already closed
     if (conn.isClosed) {
-      print('[sync] sendPacketWithAck abort: connection closed before send');
+      print('[sync] sendPacketWaitAck abort: connection closed before send');
       return false;
     }
+
+    final encoded = packet.encode();
+    final packetSizeMB = encoded.length / (1024 * 1024);
+
+    // If packet is > 5MB, split it into chunks to prevent Send-Q overflow
+    if (encoded.length > 5 * 1024 * 1024) {
+      print(
+        '${_timestamp()} [sync] Large packet detected (${packetSizeMB.toStringAsFixed(2)}MB) - splitting into chunks',
+      );
+      return await _sendLargePacketInChunks(
+        conn,
+        encoded,
+        fileId,
+        shouldCancel,
+      );
+    }
+
     // If fileId is not provided, extract it from the packet data
     String actualFileId = fileId ?? '';
     if (actualFileId.isEmpty) {
@@ -485,32 +561,36 @@ class MediaSyncProtocol {
         final jsonData = jsonDecode(jsonStr) as Map<String, dynamic>;
         actualFileId = jsonData['id'] as String? ?? '';
       } catch (e) {
-        print('Failed to extract fileId from packet: $e');
+        print('${_timestamp()} Failed to extract fileId from packet: $e');
       }
     }
 
     // Calculate timeout based on packet size
-    // Assume upload speed of 1MB/s (conservative for mobile networks)
-    // Add base timeout of 10 seconds for processing
-    final packetSizeBytes = packet.data.length;
-    final packetSizeMB = packetSizeBytes / (1024 * 1024);
     final baseTimeoutSeconds = 10;
-    final uploadTimeSeconds =
-        (packetSizeMB * 1.5).ceil(); // 1.5s per MB to be conservative
+    final uploadTimeSeconds = (packetSizeMB * 1.5).ceil();
     final timeoutSeconds = baseTimeoutSeconds + uploadTimeSeconds;
     final timeout = Duration(
-      seconds: timeoutSeconds.clamp(10, 300),
-    ); // Min 10s, max 5 minutes
-
-    print(
-      '[sync] Sending packet fileId=$actualFileId sizeMB=${packetSizeMB.toStringAsFixed(2)} timeout=${timeout.inSeconds}s',
+      seconds: timeoutSeconds.clamp(10, 60), // Shorter max timeout
     );
 
-    final encoded = packet.encode();
+    print(
+      '${_timestamp()} [sync] Sending packet fileId=$actualFileId sizeMB=${packetSizeMB.toStringAsFixed(2)} timeout=${timeout.inSeconds}s',
+    );
+
     try {
-      await conn.sendData(encoded);
+      // Add timeout to sendData itself to detect stuck Send-Q
+      await conn
+          .sendData(encoded)
+          .timeout(
+            const Duration(seconds: 15),
+            onTimeout: () {
+              throw TimeoutException(
+                'sendData stuck for 15s - Send-Q likely full',
+              );
+            },
+          );
     } catch (e) {
-      print('[sync] sendData failed (marking closed): $e');
+      print('${_timestamp()} [sync] sendData failed (marking closed): $e');
       conn.isClosed = true;
       try {
         conn.disconnect();
@@ -526,7 +606,7 @@ class MediaSyncProtocol {
         shouldCancel: shouldCancel,
       );
       print(
-        '[sync] Ack packet received type=${responsePacket.type} len=${responsePacket.data.length}',
+        '${_timestamp()} [sync] Ack packet received type=${responsePacket.type} len=${responsePacket.data.length}',
       );
       final responseStr = utf8.decode(responsePacket.data);
       // syncComplete is used as the ack type
@@ -536,7 +616,7 @@ class MediaSyncProtocol {
         if (conn.isClosed) {
           // Edge case: server closed right after ack
           print(
-            '[sync] Connection flagged closed post-ack, treating as success but caller should recreate conn',
+            '${_timestamp()} [sync] Connection flagged closed post-ack, treating as success but caller should recreate conn',
           );
         }
         return true;
@@ -544,11 +624,89 @@ class MediaSyncProtocol {
 
       return false;
     } catch (e) {
-      print('[sync] Error waiting for ack: $e (closing connection)');
+      print(
+        '${_timestamp()} [sync] Error waiting for ack: $e (closing connection)',
+      );
       conn.isClosed = true;
       try {
         conn.disconnect();
       } catch (_) {}
+      return false;
+    }
+  }
+
+  /// Send large packet in smaller chunks to prevent Send-Q overflow
+  /// Splits packet into 1MB pieces and sends with delays
+  static Future<bool> _sendLargePacketInChunks(
+    ServerConnection conn,
+    Uint8List encodedPacket,
+    String? fileId,
+    bool Function()? shouldCancel,
+  ) async {
+    const chunkSize = 1 * 1024 * 1024; // 1MB chunks
+    final totalSize = encodedPacket.length;
+    final numChunks = (totalSize / chunkSize).ceil();
+
+    print(
+      '${_timestamp()} [sync] Splitting ${(totalSize / (1024 * 1024)).toStringAsFixed(2)}MB packet into $numChunks chunks',
+    );
+
+    for (int i = 0; i < numChunks; i++) {
+      if (shouldCancel != null && shouldCancel()) {
+        print('${_timestamp()} [sync] Chunk send cancelled');
+        return false;
+      }
+
+      if (conn.isClosed) {
+        print('${_timestamp()} [sync] Connection closed during chunk send');
+        return false;
+      }
+
+      final start = i * chunkSize;
+      final end = ((i + 1) * chunkSize).clamp(0, totalSize);
+      final chunk = encodedPacket.sublist(start, end);
+
+      try {
+        await conn
+            .sendData(chunk)
+            .timeout(
+              const Duration(seconds: 10),
+              onTimeout: () {
+                throw TimeoutException('Chunk $i send timed out');
+              },
+            );
+
+        // Wait between chunks to let Send-Q drain
+        if (i < numChunks - 1) {
+          await Future.delayed(const Duration(milliseconds: 200));
+        }
+      } catch (e) {
+        print('${_timestamp()} [sync] Failed to send chunk $i: $e');
+        conn.isClosed = true;
+        return false;
+      }
+    }
+
+    print('${_timestamp()} [sync] All chunks sent, waiting for ACK...');
+
+    // Now wait for the server's ACK
+    try {
+      final responsePacket = await waitForResponse(
+        conn,
+        timeout: const Duration(seconds: 30),
+        shouldCancel: shouldCancel,
+      );
+
+      final responseStr = utf8.decode(responsePacket.data);
+      if (responsePacket.type == MediaSyncPacketType.syncComplete &&
+          (fileId == null || responseStr.contains('OK:$fileId'))) {
+        return true;
+      }
+
+      print('${_timestamp()} [sync] Unexpected response: ${responseStr}');
+      return false;
+    } catch (e) {
+      print('${_timestamp()} [sync] Error waiting for ACK after chunks: $e');
       return false;
     }
   }
@@ -630,7 +788,7 @@ class MediaSyncProtocol {
   /// Send complete signal
   static Future<void> sendSyncComplete(ServerConnection conn) async {
     final packet = PacketEnc(MediaSyncPacketType.syncComplete, Uint8List(0));
-    await sendPacketWithAck(
+    await sendPacketWaitAck(
       conn,
       packet,
       "sync_complete",
@@ -677,10 +835,12 @@ class MediaSyncProtocol {
           }
         } catch (e) {
           // Fall through to string parse fallback below
-          print('Error decoding binary media count: $e');
+          print('${_timestamp()} Error decoding binary media count: $e');
         }
       } else {
-        print('Unexpected packet type for media count: ${responsePacket.type}');
+        print(
+          '${_timestamp()} Unexpected packet type for media count: ${responsePacket.type}',
+        );
       }
 
       // Fallback: some servers may still send count as UTF-8 string
@@ -692,7 +852,7 @@ class MediaSyncProtocol {
       }
       return 0;
     } catch (e) {
-      print('Error getting media count: $e');
+      print('${_timestamp()} Error getting media count: $e');
       return 0;
     }
   }
@@ -722,7 +882,9 @@ class MediaSyncProtocol {
     try {
       final responsePacket = await waitForResponse(conn);
       if (responsePacket.type != MediaSyncPacketType.mediaThumbData) {
-        print('Unexpected response type: ${responsePacket.type}');
+        print(
+          '${_timestamp()} Unexpected response type: ${responsePacket.type}',
+        );
         return [];
       }
 
@@ -738,7 +900,7 @@ class MediaSyncProtocol {
           .map((item) => MediaThumbItem.fromJson(item as Map<String, dynamic>))
           .toList();
     } catch (e) {
-      print('Error getting media thumb list: $e');
+      print('${_timestamp()} Error getting media thumb list: $e');
       return [];
     }
   }
@@ -753,7 +915,9 @@ class MediaSyncProtocol {
         return [];
       }
 
-      print('Fetching all server file IDs (total: $totalCount)...');
+      print(
+        '${_timestamp()} Fetching all server file IDs (total: $totalCount)...',
+      );
 
       // Fetch all pages with larger page size for efficiency
       const pageSize = 100;
@@ -761,15 +925,17 @@ class MediaSyncProtocol {
       final allFileIds = <String>[];
 
       for (int page = 0; page < totalPages; page++) {
-        print('Fetching page ${page + 1}/$totalPages...');
+        print('${_timestamp()} Fetching page ${page + 1}/$totalPages...');
         final thumbList = await getMediaThumbList(conn, page, pageSize);
         allFileIds.addAll(thumbList.map((item) => item.id));
       }
 
-      print('Retrieved ${allFileIds.length} file IDs from server');
+      print(
+        '${_timestamp()} Retrieved ${allFileIds.length} file IDs from server',
+      );
       return allFileIds;
     } catch (e) {
-      print('Error getting all server file IDs: $e');
+      print('${_timestamp()} Error getting all server file IDs: $e');
       return [];
     }
   }

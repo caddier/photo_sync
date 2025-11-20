@@ -24,7 +24,8 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
   bool _loading = false;
   int _totalMediaCount = 0;
   ServerConnection? _connection; // Persistent connection
-  Set<String> _localMediaFilenames = {}; // Cache of local media filenames (without extensions)
+  Set<String> _localMediaFilenames =
+      {}; // Cache of local media filenames (without extensions)
   bool _localMediaLoaded = false;
 
   // selectedServer is now provided via the widget constructor from MainTabPage
@@ -55,16 +56,16 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
       return _connection!;
     }
 
-    print('ServerTab: Creating new connection to ${server.ipAddress}:9922');
+    print('ServerTab: Creating new connection to ${server.ipAddress}:8080');
     // Create new connection
-    _connection = ServerConnection(server.ipAddress ?? '', 9922);
+    _connection = ServerConnection(server.ipAddress ?? '', 8080);
     await _connection!.connect();
     print('ServerTab: Connected successfully');
 
     // Send phone name (sync start) for new connections
     // Get device name (will use saved name from database or fallback to system name)
     String phoneName = await DeviceManager.getLocalDeviceName();
-    
+
     print('Sending sync start with device name: $phoneName');
     await MediaSyncProtocol.sendSyncStart(_connection!, phoneName);
     print('ServerTab: Sync start sent successfully');
@@ -75,7 +76,9 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
   Future<void> _refreshGallery() async {
     if (_loading) return;
     if (mounted) {
-      setState(() { _loading = true; });
+      setState(() {
+        _loading = true;
+      });
     }
 
     try {
@@ -106,7 +109,7 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
       print('ServerTab: Received media count: $count');
 
       if (!mounted) return;
-      
+
       // Update the UI with the count
       setState(() {
         _totalMediaCount = count;
@@ -116,20 +119,25 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
       if (count > 0) {
         print('ServerTab: Requesting thumbnail list for page $_currentPage...');
         final thumbList = await MediaSyncProtocol.getMediaThumbList(
-          conn, 
+          conn,
           _currentPage, // refresh current page
-          _itemsPerPage
+          _itemsPerPage,
         );
         print('ServerTab: Received ${thumbList.length} thumbnails');
 
         if (!mounted) return;
         // Update the UI with the thumbnail data
         setState(() {
-          _mediaItems = thumbList.map((thumb) => ServerMediaItem(
-            id: thumb.id,
-            thumbData: thumb.thumbData,
-            isVideo: thumb.isVideo,
-          )).toList();
+          _mediaItems =
+              thumbList
+                  .map(
+                    (thumb) => ServerMediaItem(
+                      id: thumb.id,
+                      thumbData: thumb.thumbData,
+                      isVideo: thumb.isVideo,
+                    ),
+                  )
+                  .toList();
           // Do not reset _currentPage here
           _loading = false;
         });
@@ -156,8 +164,10 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
 
   Future<void> _loadPage(int pageIndex) async {
     if (_loading) return;
-    
-    setState(() { _loading = true; });
+
+    setState(() {
+      _loading = true;
+    });
 
     try {
       // Use selected server passed from parent
@@ -165,7 +175,9 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
 
       if (server == null) {
         if (!mounted) return;
-        setState(() { _loading = false; });
+        setState(() {
+          _loading = false;
+        });
         return;
       }
 
@@ -174,20 +186,25 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
 
       // Request media thumbnail list for the specified page
       final thumbList = await MediaSyncProtocol.getMediaThumbList(
-        conn, 
+        conn,
         pageIndex,
-        _itemsPerPage
+        _itemsPerPage,
       );
 
       if (!mounted) return;
-      
+
       // Update the UI with the thumbnail data for this page
       setState(() {
-        _mediaItems = thumbList.map((thumb) => ServerMediaItem(
-          id: thumb.id,
-          thumbData: thumb.thumbData,
-          isVideo: thumb.isVideo,
-        )).toList();
+        _mediaItems =
+            thumbList
+                .map(
+                  (thumb) => ServerMediaItem(
+                    id: thumb.id,
+                    thumbData: thumb.thumbData,
+                    isVideo: thumb.isVideo,
+                  ),
+                )
+                .toList();
         _currentPage = pageIndex;
         _loading = false;
       });
@@ -210,25 +227,27 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
       return;
     }
 
-    setState(() { _loading = true; });
+    setState(() {
+      _loading = true;
+    });
 
     try {
       _showMessage('Syncing database with server...');
-      
+
       // Get connection
       final conn = await _ensureConnection();
-      
+
       // Get all file IDs from server
       final serverFileIds = await MediaSyncProtocol.getAllServerFileIds(conn);
-      
+
       // Sync local database with server data
       final history = SyncHistory();
       await history.syncWithServer(serverFileIds);
-      
+
       if (!mounted) return;
-      
+
       _showMessage('Database synced: ${serverFileIds.length} files on server');
-      
+
       // Refresh the gallery after sync
       await _refreshGallery();
     } catch (e) {
@@ -237,7 +256,9 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
       _showMessage('Error syncing database: ${e.toString()}');
     } finally {
       if (mounted) {
-        setState(() { _loading = false; });
+        setState(() {
+          _loading = false;
+        });
       }
     }
   }
@@ -245,22 +266,19 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
   void _showMessage(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        duration: const Duration(seconds: 2),
-      ),
+      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
     );
   }
 
   /// Load all local media filenames using MediaSyncProtocol.getAssetFilename
   Future<void> _loadLocalMediaFilenames() async {
     if (_localMediaLoaded) return; // Already loaded
-    
+
     try {
       print('Loading local media filenames using getAssetFilename...');
       final assets = await MediaEnumerator.getAllLocalAssets();
       final Set<String> filenames = {};
-      
+
       // Use MediaSyncProtocol.getAssetFilename to get consistent filenames
       for (var asset in assets) {
         try {
@@ -275,7 +293,7 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
           print('Error getting filename for asset: $e');
         }
       }
-      
+
       if (mounted) {
         setState(() {
           _localMediaFilenames = filenames;
@@ -296,7 +314,7 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
     if (lastDot > 0) {
       filenameWithoutExt = serverFileId.substring(0, lastDot);
     }
-    
+
     return _localMediaFilenames.contains(filenameWithoutExt);
   }
 
@@ -308,10 +326,11 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
         return Image.memory(
           bytes,
           fit: BoxFit.cover,
-          errorBuilder: (c, e, s) => Container(
-            color: Colors.grey[300],
-            child: const Center(child: Icon(Icons.broken_image)),
-          ),
+          errorBuilder:
+              (c, e, s) => Container(
+                color: Colors.grey[300],
+                child: const Center(child: Icon(Icons.broken_image)),
+              ),
         );
       } catch (e) {
         print('Error decoding thumbnail: $e');
@@ -321,19 +340,20 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
         );
       }
     }
-    
+
     // Fallback to URL if available
     if (item.url != null && item.url!.isNotEmpty) {
       return Image.network(
         item.url!,
         fit: BoxFit.cover,
-        errorBuilder: (c, e, s) => Container(
-          color: Colors.grey[300],
-          child: const Center(child: Icon(Icons.broken_image)),
-        ),
+        errorBuilder:
+            (c, e, s) => Container(
+              color: Colors.grey[300],
+              child: const Center(child: Icon(Icons.broken_image)),
+            ),
       );
     }
-    
+
     // Default placeholder
     return Container(
       color: Colors.grey[300],
@@ -376,7 +396,8 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
   void didUpdateWidget(ServerTab oldWidget) {
     super.didUpdateWidget(oldWidget);
     // If the selected server changed, close the old connection and refresh
-    if (oldWidget.selectedServer?.deviceName != widget.selectedServer?.deviceName) {
+    if (oldWidget.selectedServer?.deviceName !=
+        widget.selectedServer?.deviceName) {
       _closeConnection();
       _refreshGallery();
     }
@@ -409,33 +430,50 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
                       ElevatedButton.icon(
                         onPressed: _loading ? null : _downloadSelected,
                         icon: const Icon(Icons.download, size: 16),
-                        label: const Text('Download', style: TextStyle(fontSize: 12)),
+                        label: const Text(
+                          'Download',
+                          style: TextStyle(fontSize: 12),
+                        ),
                         style: ElevatedButton.styleFrom(
                           minimumSize: const Size(80, 28),
-                          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 4,
+                            horizontal: 8,
+                          ),
                           backgroundColor: Colors.blue,
                           foregroundColor: Colors.white,
                         ),
                       ),
-                    if (_selectedIndexes.isNotEmpty)
-                      const SizedBox(width: 6),
+                    if (_selectedIndexes.isNotEmpty) const SizedBox(width: 6),
                     ElevatedButton.icon(
                       onPressed: _loading ? null : _refreshGallery,
                       icon: const Icon(Icons.refresh, size: 16),
-                      label: const Text('Refresh', style: TextStyle(fontSize: 12)),
+                      label: const Text(
+                        'Refresh',
+                        style: TextStyle(fontSize: 12),
+                      ),
                       style: ElevatedButton.styleFrom(
                         minimumSize: const Size(80, 28),
-                        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 4,
+                          horizontal: 8,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 6),
                     ElevatedButton.icon(
                       onPressed: _loading ? null : _syncDatabaseWithServer,
                       icon: const Icon(Icons.sync, size: 16),
-                      label: const Text('Sync DB', style: TextStyle(fontSize: 12)),
+                      label: const Text(
+                        'Sync DB',
+                        style: TextStyle(fontSize: 12),
+                      ),
                       style: ElevatedButton.styleFrom(
                         minimumSize: const Size(80, 28),
-                        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 4,
+                          horizontal: 8,
+                        ),
                         backgroundColor: Colors.orange.shade700,
                         foregroundColor: Colors.white,
                       ),
@@ -444,17 +482,30 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
                       const SizedBox(width: 10),
                       DropdownButton<int>(
                         value: _currentPage,
-                        items: List.generate(pageCount, (i) => DropdownMenuItem(
-                          value: i,
-                          child: Text('Page ${i + 1}', style: const TextStyle(fontSize: 12)),
-                        )),
-                        onChanged: _loading ? null : (int? selected) {
-                          if (selected != null && selected != _currentPage) {
-                            _loadPage(selected);
-                          }
-                        },
+                        items: List.generate(
+                          pageCount,
+                          (i) => DropdownMenuItem(
+                            value: i,
+                            child: Text(
+                              'Page ${i + 1}',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ),
+                        ),
+                        onChanged:
+                            _loading
+                                ? null
+                                : (int? selected) {
+                                  if (selected != null &&
+                                      selected != _currentPage) {
+                                    _loadPage(selected);
+                                  }
+                                },
                         underline: Container(),
-                        style: const TextStyle(fontSize: 12, color: Colors.black),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.black,
+                        ),
                         isDense: true,
                       ),
                     ],
@@ -473,126 +524,160 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
           ),
         ),
         Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : _mediaItems.isEmpty
+          child:
+              _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _mediaItems.isEmpty
                   ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.photo_library_outlined, size: 64, color: Colors.grey[400]),
-                          const SizedBox(height: 16),
-                          Text(
-                            'No media on server',
-                            style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.photo_library_outlined,
+                          size: 64,
+                          color: Colors.grey[400],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No media on server',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: Colors.grey[600],
                           ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Select a server and tap Refresh',
-                            style: TextStyle(fontSize: 13, color: Colors.grey[500]),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Select a server and tap Refresh',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey[500],
                           ),
-                        ],
-                      ),
-                    )
+                        ),
+                      ],
+                    ),
+                  )
                   : GridView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    mainAxisSpacing: 8,
-                    crossAxisSpacing: 8,
-                    childAspectRatio: 1,
-                  ),
-                  itemCount: _mediaItems.length,
-                  itemBuilder: (context, idx) {
-                    final item = _mediaItems[idx];
-                    final isInLibrary = item.id != null && _isMediaInLocalLibrary(item.id!);
-                    final isSelected = _selectedIndexes.contains(idx);
-                    return GestureDetector(
-                      onTap: (!isInLibrary && !_loading)
-                          ? () {
-                              setState(() {
-                                if (isSelected) {
-                                  _selectedIndexes.remove(idx);
-                                } else {
-                                  _selectedIndexes.add(idx);
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 3,
+                          mainAxisSpacing: 8,
+                          crossAxisSpacing: 8,
+                          childAspectRatio: 1,
+                        ),
+                    itemCount: _mediaItems.length,
+                    itemBuilder: (context, idx) {
+                      final item = _mediaItems[idx];
+                      final isInLibrary =
+                          item.id != null && _isMediaInLocalLibrary(item.id!);
+                      final isSelected = _selectedIndexes.contains(idx);
+                      return GestureDetector(
+                        onTap:
+                            (!isInLibrary && !_loading)
+                                ? () {
+                                  setState(() {
+                                    if (isSelected) {
+                                      _selectedIndexes.remove(idx);
+                                    } else {
+                                      _selectedIndexes.add(idx);
+                                    }
+                                  });
                                 }
-                              });
-                            }
-                          : null,
-                      child: Stack(
-                        children: [
-                          Positioned.fill(
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: _buildMediaWidget(item),
-                            ),
-                          ),
-                          if (item.isVideo)
-                            Positioned(
-                              right: 4,
-                              bottom: 4,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withOpacity(0.6),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: const [
-                                    Icon(Icons.videocam, color: Colors.white, size: 14),
-                                    SizedBox(width: 4),
-                                    Text(
-                                      'VIDEO',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
-                                        letterSpacing: 0.5,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          // Green checkmark for media that exists in local library
-                          if (isInLibrary)
-                            Positioned(
-                              top: 4,
-                              right: 4,
-                              child: Container(
-                                padding: const EdgeInsets.all(4),
-                                decoration: BoxDecoration(
-                                  color: Colors.green,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.white, width: 2),
-                                ),
-                                child: const Icon(
-                                  Icons.check,
-                                  color: Colors.white,
-                                  size: 16,
-                                ),
-                              ),
-                            ),
-                          // Selection overlay for selected items
-                          if (isSelected)
+                                : null,
+                        child: Stack(
+                          children: [
                             Positioned.fill(
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: Colors.blue.withOpacity(0.3),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.blue, width: 2),
-                                ),
-                                child: const Center(
-                                  child: Icon(Icons.check_circle, color: Colors.blue, size: 32),
-                                ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: _buildMediaWidget(item),
                               ),
                             ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
+                            if (item.isVideo)
+                              Positioned(
+                                right: 4,
+                                bottom: 4,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withOpacity(0.6),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: const [
+                                      Icon(
+                                        Icons.videocam,
+                                        color: Colors.white,
+                                        size: 14,
+                                      ),
+                                      SizedBox(width: 4),
+                                      Text(
+                                        'VIDEO',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          letterSpacing: 0.5,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            // Green checkmark for media that exists in local library
+                            if (isInLibrary)
+                              Positioned(
+                                top: 4,
+                                right: 4,
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: Colors.white,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  child: const Icon(
+                                    Icons.check,
+                                    color: Colors.white,
+                                    size: 16,
+                                  ),
+                                ),
+                              ),
+                            // Selection overlay for selected items
+                            if (isSelected)
+                              Positioned.fill(
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue.withOpacity(0.3),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: Colors.blue,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  child: const Center(
+                                    child: Icon(
+                                      Icons.check_circle,
+                                      color: Colors.blue,
+                                      size: 32,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
         ),
         if (pageCount > 1)
           Padding(
@@ -602,16 +687,21 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
               children: [
                 IconButton(
                   icon: const Icon(Icons.chevron_left),
-                    onPressed: _loading || _currentPage <= 0
-                        ? null
-                        : () => _loadPage(_currentPage - 1),
+                  onPressed:
+                      _loading || _currentPage <= 0
+                          ? null
+                          : () => _loadPage(_currentPage - 1),
                 ),
-                Text('Page ${_currentPage + 1} / $pageCount', style: const TextStyle(fontSize: 13)),
+                Text(
+                  'Page ${_currentPage + 1} / $pageCount',
+                  style: const TextStyle(fontSize: 13),
+                ),
                 IconButton(
                   icon: const Icon(Icons.chevron_right),
-                  onPressed: _loading || _currentPage >= pageCount - 1 
-                      ? null 
-                      : () => _loadPage(_currentPage + 1),
+                  onPressed:
+                      _loading || _currentPage >= pageCount - 1
+                          ? null
+                          : () => _loadPage(_currentPage + 1),
                 ),
               ],
             ),
@@ -623,14 +713,18 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
   // Download selected items (stub)
   Future<void> _downloadSelected() async {
     if (_selectedIndexes.isEmpty || _loading) return;
-    setState(() { _loading = true; });
+    setState(() {
+      _loading = true;
+    });
     try {
       final conn = await _ensureConnection();
       final idx = _selectedIndexes.first;
       final item = _mediaItems[idx];
       if (item.id == null) {
         _showMessage('Invalid file id');
-        setState(() { _loading = false; });
+        setState(() {
+          _loading = false;
+        });
         return;
       }
       final fileId = item.id!;
@@ -639,13 +733,17 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
 
       // Send mediaDownloadList request (single file)
       final requestList = jsonEncode([fileId]);
-      final packet = PacketEnc(MediaSyncPacketType.mediaDownloadList, utf8.encode(requestList));
+      final packet = PacketEnc(
+        MediaSyncPacketType.mediaDownloadList,
+        utf8.encode(requestList),
+      );
       await conn.sendData(packet.encode());
 
       // Wait for server response
       final responsePacket = await MediaSyncProtocol.waitForResponse(conn);
       bool downloadSuccess = false;
-      if (!isVideo && responsePacket.type == MediaSyncPacketType.mediaDownloadAck) {
+      if (!isVideo &&
+          responsePacket.type == MediaSyncPacketType.mediaDownloadAck) {
         // Photo download: response is a JSON list of MediaPacket
         final responseStr = utf8.decode(responsePacket.data);
         final photoList = jsonDecode(responseStr) as List<dynamic>;
@@ -663,9 +761,12 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
         } else {
           _showMessage('Invalid photo response format');
         }
-      } else if (isVideo && responsePacket.type == MediaSyncPacketType.chunkedVideoStart) {
+      } else if (isVideo &&
+          responsePacket.type == MediaSyncPacketType.chunkedVideoStart) {
         // Video download: handle chunked transfer
-        final startInfo = jsonDecode(utf8.decode(responsePacket.data)) as Map<String, dynamic>;
+        final startInfo =
+            jsonDecode(utf8.decode(responsePacket.data))
+                as Map<String, dynamic>;
         final totalChunks = startInfo['totalChunks'] as int? ?? 0;
         final videoId = startInfo['id'] as String? ?? fileId;
         List<int> videoBytes = [];
@@ -675,7 +776,8 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
             _showMessage('Unexpected packet type during video download');
             break;
           }
-          final chunkInfo = jsonDecode(utf8.decode(chunkPacket.data)) as Map<String, dynamic>;
+          final chunkInfo =
+              jsonDecode(utf8.decode(chunkPacket.data)) as Map<String, dynamic>;
           final base64Chunk = chunkInfo['data'] as String?;
           if (base64Chunk != null) {
             videoBytes.addAll(base64Decode(base64Chunk));
@@ -697,7 +799,8 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
       // If download succeeded, add green marker by updating local media filenames
       if (downloadSuccess && item.id != null) {
         final lastDot = item.id!.lastIndexOf('.');
-        String filenameWithoutExt = lastDot > 0 ? item.id!.substring(0, lastDot) : item.id!;
+        String filenameWithoutExt =
+            lastDot > 0 ? item.id!.substring(0, lastDot) : item.id!;
         setState(() {
           _localMediaFilenames.add(filenameWithoutExt);
         });
@@ -718,11 +821,6 @@ class ServerMediaItem {
   final String? url;
   final String? thumbData; // base64 encoded thumbnail data
   final bool isVideo;
-  
-  ServerMediaItem({
-    this.id,
-    this.url, 
-    this.thumbData,
-    required this.isVideo
-  });
+
+  ServerMediaItem({this.id, this.url, this.thumbData, required this.isVideo});
 }

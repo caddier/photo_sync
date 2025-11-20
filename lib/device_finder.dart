@@ -10,10 +10,8 @@ import 'package:photo_sync/sync_history.dart';
 class DeviceInfo {
   final String deviceName;
   final String? ipAddress;
-  DeviceInfo({required this.deviceName,  this.ipAddress});
+  DeviceInfo({required this.deviceName, this.ipAddress});
 }
-
-
 
 class DeviceManager {
   // Simulated device discovery
@@ -41,88 +39,80 @@ class DeviceManager {
     return devices;
   }
 
-
   static Future<Map<String, String?>> getIpAndMask() async {
-  final info = NetworkInfo();
+    final info = NetworkInfo();
 
-  String? ip = await info.getWifiIP();
-  String? mask = await info.getWifiSubmask();
+    String? ip = await info.getWifiIP();
+    String? mask = await info.getWifiSubmask();
 
-  return {
-    "ip": ip,
-    "mask": mask,
-  };
-}
-
-
-static String calculateBroadcastAddress(String ip, String mask) {
-  final ipParts = ip.split('.').map(int.parse).toList();
-  final maskParts = mask.split('.').map(int.parse).toList();
-
-  final broadcast = List<int>.filled(4, 0);
-
-  for (int i = 0; i < 4; i++) {
-    broadcast[i] = (ipParts[i] & maskParts[i]) | (~maskParts[i] & 0xFF);
+    return {"ip": ip, "mask": mask};
   }
 
-  return broadcast.join('.');
-}
+  static String calculateBroadcastAddress(String ip, String mask) {
+    final ipParts = ip.split('.').map(int.parse).toList();
+    final maskParts = mask.split('.').map(int.parse).toList();
 
+    final broadcast = List<int>.filled(4, 0);
 
-
- static Future<List<String>> sendUdpBroadcast(String message, int port) async {
-  final responses = <String>[];
-
-  // 1. Create UDP socket
-  RawDatagramSocket socket = await RawDatagramSocket.bind(
-    InternetAddress.anyIPv4, // bind to any local IP
-    0, // system-assigned port
-  );
-
-  print('UDP socket bound to ${socket.address.address}:${socket.port}');
-
-  // 2. Enable broadcast
-  socket.broadcastEnabled = true;
-
-  // 3. Convert string message to bytes
-  final data = Uint8List.fromList(message.codeUnits);
-
-  // 4. Get broadcast address
-  var ipAndMask = await getIpAndMask();
-  print('Local IP: ${ipAndMask["ip"]}, Mask: ${ipAndMask["mask"]}');
-  String localIp = ipAndMask["ip"] ?? '255.255.255.255';
-  String mask = ipAndMask["mask"] ?? '255.255.255.0';
-  String broadcastAddress = calculateBroadcastAddress(localIp, mask);
-
-  // 5. Send broadcast
-  socket.send(data, InternetAddress(broadcastAddress), port);
-  print('UDP broadcast sent to $broadcastAddress:$port');
-
-  // // 6. Prepare a completer to collect responses
-  // final completer = Completer<List<String>>();
-
-  // 7. Listen for incoming responses
-  // server should respond with the string "photo_server:$name,IP:$ip"
-  socket.listen((RawSocketEvent event) {
-    if (event == RawSocketEvent.read) {
-      final dg = socket.receive();
-      if (dg != null) {
-        final msg = String.fromCharCodes(dg.data);
-        final from = dg.address.address;
-        print('Received: $msg from $from:${dg.port}');
-        responses.add(msg);
-      }
+    for (int i = 0; i < 4; i++) {
+      broadcast[i] = (ipParts[i] & maskParts[i]) | (~maskParts[i] & 0xFF);
     }
-  });
 
-  // 8. Wait for responses for 5 seconds
-  await Future.delayed(const Duration(seconds: 5));
+    return broadcast.join('.');
+  }
 
-  // 9. Close socket and return responses
-  socket.close();
-  return responses;
-}
+  static Future<List<String>> sendUdpBroadcast(String message, int port) async {
+    final responses = <String>[];
 
+    // 1. Create UDP socket
+    RawDatagramSocket socket = await RawDatagramSocket.bind(
+      InternetAddress.anyIPv4, // bind to any local IP
+      0, // system-assigned port
+    );
+
+    print('UDP socket bound to ${socket.address.address}:${socket.port}');
+
+    // 2. Enable broadcast
+    socket.broadcastEnabled = true;
+
+    // 3. Convert string message to bytes
+    final data = Uint8List.fromList(message.codeUnits);
+
+    // 4. Get broadcast address
+    var ipAndMask = await getIpAndMask();
+    print('Local IP: ${ipAndMask["ip"]}, Mask: ${ipAndMask["mask"]}');
+    String localIp = ipAndMask["ip"] ?? '255.255.255.255';
+    String mask = ipAndMask["mask"] ?? '255.255.255.0';
+    String broadcastAddress = calculateBroadcastAddress(localIp, mask);
+
+    // 5. Send broadcast
+    socket.send(data, InternetAddress(broadcastAddress), port);
+    print('UDP broadcast sent to $broadcastAddress:$port');
+
+    // // 6. Prepare a completer to collect responses
+    // final completer = Completer<List<String>>();
+
+    // 7. Listen for incoming responses
+    // server should respond with the string "photo_server:$name,IP:$ip"
+    socket.listen((RawSocketEvent event) {
+      if (event == RawSocketEvent.read) {
+        final dg = socket.receive();
+        if (dg != null) {
+          final msg = String.fromCharCodes(dg.data);
+          final from = dg.address.address;
+          print('Received: $msg from $from:${dg.port}');
+          responses.add(msg);
+        }
+      }
+    });
+
+    // 8. Wait for responses for 5 seconds
+    await Future.delayed(const Duration(seconds: 5));
+
+    // 9. Close socket and return responses
+    socket.close();
+    return responses;
+  }
 
   /// Stream-based discovery: emits each discovered DeviceInfo as responses arrive.
   /// This allows callers (UI) to update incrementally instead of waiting
@@ -134,10 +124,7 @@ static String calculateBroadcastAddress(String ip, String mask) {
     controller = StreamController<DeviceInfo>(
       onListen: () async {
         try {
-          socket = await RawDatagramSocket.bind(
-            InternetAddress.anyIPv4,
-            0,
-          );
+          socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
 
           socket!.broadcastEnabled = true;
 
@@ -166,7 +153,9 @@ static String calculateBroadcastAddress(String ip, String mask) {
                     ipAddress = part.substring('IP:'.length);
                   }
                 }
-                controller!.add(DeviceInfo(deviceName: deviceName, ipAddress: ipAddress));
+                controller!.add(
+                  DeviceInfo(deviceName: deviceName, ipAddress: ipAddress),
+                );
               }
             }
           });
@@ -224,9 +213,8 @@ static String calculateBroadcastAddress(String ip, String mask) {
     } else if (Platform.isIOS) {
       return 'iOS Device';
     }
-    
+
     // Default fallback for other platforms
     return 'Unknown Device';
   }
-
 }
