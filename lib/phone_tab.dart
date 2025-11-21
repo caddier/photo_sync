@@ -11,9 +11,12 @@ class PhoneTab extends StatefulWidget {
   State<PhoneTab> createState() => _PhoneTabState();
 }
 
-class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin {
+class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
   final SyncHistory _history = SyncHistory();
   late TabController _tabController;
+
+  @override
+  bool get wantKeepAlive => true;
 
   // Photo Data
   final Map<String, Future<Uint8List?>> _photoThumbCache = {};
@@ -709,6 +712,7 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // Required for AutomaticKeepAliveClientMixin
     return Column(
       children: [
         Stack(
