@@ -15,7 +15,7 @@ class ServerTab extends StatefulWidget {
   State<ServerTab> createState() => _ServerTabState();
 }
 
-class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
+class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver, AutomaticKeepAliveClientMixin {
   int _currentPage = 0;
   static const int _itemsPerPage = 12;
   List<ServerMediaItem> _mediaItems = [];
@@ -23,6 +23,9 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
   bool _loading = false;
   int _totalMediaCount = 0;
   final LocalMediaCache _mediaCache = LocalMediaCache(); // Singleton cache instance
+
+  @override
+  bool get wantKeepAlive => true;
 
   // selectedServer is now provided via the widget constructor from MainTabPage
 
@@ -48,7 +51,7 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
           _mediaItems = [];
           _totalMediaCount = 0;
           _loading = false;
-          _currentPage = 0;
+          // Don't reset _currentPage to preserve page state when switching tabs
         });
         return;
       }
@@ -304,8 +307,10 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
   @override
   void didUpdateWidget(ServerTab oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // If the selected server changed, refresh
-    if (oldWidget.selectedServer?.deviceName != widget.selectedServer?.deviceName) {
+    // If the selected server changed, refresh but preserve page if same server
+    if (oldWidget.selectedServer?.deviceName != widget.selectedServer?.deviceName || oldWidget.selectedServer?.ipAddress != widget.selectedServer?.ipAddress) {
+      // Server actually changed, reset to page 0 and refresh
+      _currentPage = 0;
       _refreshGallery();
     }
   }
@@ -318,6 +323,7 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // Required for AutomaticKeepAliveClientMixin
     // Calculate total number of pages based on total media count from server
     final pageCount = (_totalMediaCount / _itemsPerPage).ceil();
 
