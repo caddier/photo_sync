@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:photo_sync/sync_history.dart';
 import 'package:photo_sync/http_media_sync_protocol.dart';
+import 'package:photo_sync/utils.dart';
 
 class PhoneTab extends StatefulWidget {
   const PhoneTab({super.key});
@@ -17,6 +18,8 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
 
   @override
   bool get wantKeepAlive => true;
+
+  DateTime? _lastSyncCheck;
 
   // Photo Data
   final Map<String, Future<Uint8List?>> _photoThumbCache = {};
@@ -51,18 +54,52 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _loadCache();
-    _loadPhotos();
-    _loadVideos();
+    _tabController.addListener(_onTabChanged);
+    _initializeTab();
+  }
+
+  void _onTabChanged() {
+    // When switching between Photos and Videos tabs, refresh sync status
+    if (!_tabController.indexIsChanging) {
+      // Reload sync cache and status when tab changes
+      _refreshSyncStatus();
+    }
+  }
+
+  Future<void> _refreshSyncStatus() async {
+    // Reload the cache from database
+    await _history.loadSyncedFilesCache();
+    final photoCount = _history.getSyncedPhotoCount();
+    final videoCount = _history.getSyncedVideoCount();
+    print('${timestamp()} [PhoneTab] Cache refreshed: $photoCount photos, $videoCount videos synced');
+
+    // Reload sync status for currently displayed items
+    if (_tabController.index == 0 && _displayedPhotos.isNotEmpty) {
+      _loadPhotoSyncedStatus();
+    } else if (_tabController.index == 1 && _displayedVideos.isNotEmpty) {
+      _loadVideoSyncedStatus();
+    }
+  }
+
+  Future<void> _initializeTab() async {
+    // Load cache first, then load photos and videos
+    await _loadCache();
+    await _loadPhotos();
+    await _loadVideos();
   }
 
   Future<void> _loadCache() async {
     // Load the sync status cache once at startup
+    print('${timestamp()} [PhoneTab] Loading sync history cache...');
     await _history.loadSyncedFilesCache();
+    final photoCount = _history.getSyncedPhotoCount();
+    final videoCount = _history.getSyncedVideoCount();
+    print('${timestamp()} [PhoneTab] Cache loaded: $photoCount photos, $videoCount videos synced');
   }
 
   @override
   void dispose() {
+    _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     super.dispose();
   }
@@ -180,6 +217,11 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
           // Check sync status using cached database lookup
           final isSynced = _history.isFileSyncedCached(assetFilename);
 
+          // Debug: log the first few checks
+          if (syncedIds.length < 3) {
+            print('${timestamp()} [PhoneTab] Checking photo: $assetFilename, isSynced: $isSynced');
+          }
+
           // Store in cache
           _photoSyncStatusCache[a.id] = isSynced;
 
@@ -244,6 +286,11 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
 
           // Check sync status using cached database lookup
           final isSynced = _history.isFileSyncedCached(assetFilename);
+
+          // Debug: log the first few checks
+          if (syncedIds.length < 3) {
+            print('${timestamp()} [PhoneTab] Checking video: $assetFilename, isSynced: $isSynced');
+          }
 
           // Store in cache
           _videoSyncStatusCache[a.id] = isSynced;
@@ -713,6 +760,15 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
   @override
   Widget build(BuildContext context) {
     super.build(context); // Required for AutomaticKeepAliveClientMixin
+
+    // Check if we need to refresh sync status (when tab becomes visible after being away)
+    final now = DateTime.now();
+    if (_lastSyncCheck == null || now.difference(_lastSyncCheck!).inSeconds > 2) {
+      _lastSyncCheck = now;
+      // Refresh sync status in the background
+      Future.microtask(() => _refreshSyncStatus());
+    }
+
     return Column(
       children: [
         Stack(
