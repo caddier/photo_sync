@@ -806,59 +806,88 @@ class _SyncPageState extends State<SyncPage> with AutomaticKeepAliveClientMixin,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               child: Padding(
                 padding: const EdgeInsets.all(12),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      Center(
-                        child: ElevatedButton(
-                          onPressed: discoverServers,
-                          style: ElevatedButton.styleFrom(
-                            minimumSize: const Size(100, 28),
-                            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 800),
+                      curve: Curves.easeInOut,
+                      width: discoveredServers.isEmpty ? MediaQuery.of(context).size.width - 64 : null,
+                      alignment: discoveredServers.isEmpty ? Alignment.center : Alignment.centerLeft,
+                      child: IconButton(
+                        onPressed: discoverServers,
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.blue.shade600,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.all(12),
+                          elevation: 3,
+                        ),
+                        icon: const Icon(Icons.wifi_find, size: 24),
+                        tooltip: "Discover Servers",
+                      ),
+                    ),
+                    if (discoveredServers.isNotEmpty) ...[
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: AnimatedSize(
+                          duration: const Duration(milliseconds: 800),
+                          curve: Curves.easeInOut,
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.grey.shade300, width: 1),
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                ...discoveredServers.map((server) {
+                                  final isSelected = selectedServer?.deviceName == server.deviceName;
+                                  return InkWell(
+                                    onTap: () => selectServer(server),
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: Container(
+                                      margin: const EdgeInsets.symmetric(vertical: 1),
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: isSelected ? Colors.blue.shade100 : Colors.transparent,
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            isSelected ? Icons.check_circle : Icons.circle_outlined,
+                                            size: 14,
+                                            color: isSelected ? Colors.blue.shade700 : Colors.grey.shade600,
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            server.deviceName,
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                                              color: isSelected ? Colors.blue.shade900 : Colors.grey.shade800,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                              ],
+                            ),
                           ),
-                          child: const Text("Discover Servers", style: TextStyle(fontSize: 12)),
                         ),
                       ),
                     ],
-                  ),
+                  ],
                 ),
               ),
             ),
-            const SizedBox(height: 6),
-            if (discoveredServers.isNotEmpty) ...[
-              Card(
-                margin: const EdgeInsets.symmetric(horizontal: 8),
-                elevation: 2,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: Colors.green.shade400, width: 1.5)),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children:
-                        discoveredServers.map((server) {
-                          return IntrinsicHeight(
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Checkbox(
-                                  value: selectedServer?.deviceName == server.deviceName,
-                                  onChanged: (_) => selectServer(server),
-                                  visualDensity: VisualDensity.compact,
-                                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                ),
-                                Text(server.deviceName, style: const TextStyle(fontSize: 13)),
-                              ],
-                            ),
-                          );
-                        }).toList(),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 6),
-            ],
+            const SizedBox(height: 10),
             Card(
               margin: const EdgeInsets.symmetric(horizontal: 8),
               elevation: 2,
