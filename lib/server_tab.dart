@@ -1,11 +1,10 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:photo_sync/device_finder.dart';
-import 'package:photo_sync/server_conn.dart';
-import 'package:photo_sync/media_sync_protocol.dart';
+import 'package:photo_sync/http_sync_client.dart' as http_api;
 import 'package:photo_sync/sync_history.dart';
-import 'package:photo_sync/media_eumerator.dart';
-import 'package:photo_sync/packet_enc.dart';
+import 'package:photo_sync/local_media_cache.dart';
+import 'package:photo_sync/utils.dart';
 
 class ServerTab extends StatefulWidget {
   final DeviceInfo? selectedServer;
@@ -23,55 +22,11 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
   Set<int> _selectedIndexes = {}; // Indexes of selected items
   bool _loading = false;
   int _totalMediaCount = 0;
-  ServerConnection? _connection; // Persistent connection
-  Set<String> _localMediaFilenames =
-      {}; // Cache of local media filenames (without extensions)
-  bool _localMediaLoaded = false;
+  final LocalMediaCache _mediaCache = LocalMediaCache(); // Singleton cache instance
 
   // selectedServer is now provided via the widget constructor from MainTabPage
 
   // dispose is implemented at the end to also remove lifecycle observer
-
-  void _closeConnection() {
-    if (_connection != null) {
-      try {
-        _connection!.disconnect();
-      } catch (e) {
-        print('Error closing connection: $e');
-      }
-      _connection = null;
-    }
-  }
-
-  Future<ServerConnection> _ensureConnection() async {
-    final server = widget.selectedServer;
-    if (server == null) {
-      throw Exception('No server selected');
-    }
-
-    // If connection exists and is connected, reuse it
-    if (_connection != null) {
-      // Check if connection is still alive (you may want to add a ping/check method)
-      print('ServerTab: Reusing existing connection');
-      return _connection!;
-    }
-
-    print('ServerTab: Creating new connection to ${server.ipAddress}:8080');
-    // Create new connection
-    _connection = ServerConnection(server.ipAddress ?? '', 8080);
-    await _connection!.connect();
-    print('ServerTab: Connected successfully');
-
-    // Send phone name (sync start) for new connections
-    // Get device name (will use saved name from database or fallback to system name)
-    String phoneName = await DeviceManager.getLocalDeviceName();
-
-    print('Sending sync start with device name: $phoneName');
-    await MediaSyncProtocol.sendSyncStart(_connection!, phoneName);
-    print('ServerTab: Sync start sent successfully');
-
-    return _connection!;
-  }
 
   Future<void> _refreshGallery() async {
     if (_loading) return;
@@ -86,9 +41,8 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
       final server = widget.selectedServer;
 
       if (server == null) {
-        print('no server selected');
-        // No server selected, show empty gallery and close any existing connection
-        _closeConnection();
+        print('${timestamp()} no server selected');
+        // No server selected, show empty gallery
         if (!mounted) return;
         setState(() {
           _mediaItems = [];
@@ -99,14 +53,20 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
         return;
       }
 
-      print('ServerTab: Connecting to server ${server.deviceName}...');
-      // Get or create connection
-      final conn = await _ensureConnection();
-      print('ServerTab: Connection established, requesting media count...');
+      print('${timestamp()} ServerTab: Connecting to server ${server.deviceName}...');
+      print('${timestamp()} ServerTab: Requesting media count via HTTP...');
 
-      // 2. Request media count
-      final count = await MediaSyncProtocol.getMediaCount(conn);
-      print('ServerTab: Received media count: $count');
+      // Request media count via HTTP
+      int count = 0;
+      try {
+        String phoneName = await DeviceManager.getLocalDeviceName();
+        final httpClient = http_api.HttpSyncClient(serverHost: server.ipAddress ?? '', serverPort: 8080, deviceName: phoneName);
+        count = await httpClient.getMediaCount();
+        httpClient.close();
+      } catch (e) {
+        print('${timestamp()} HTTP getMediaCount failed: $e');
+      }
+      print('${timestamp()} ServerTab: Received media count: $count');
 
       if (!mounted) return;
 
@@ -115,29 +75,25 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
         _totalMediaCount = count;
       });
 
-      // 3. Request media thumbnail list for the current page
+      // 3. Request media thumbnail list for the current page (via HTTP)
       if (count > 0) {
-        print('ServerTab: Requesting thumbnail list for page $_currentPage...');
-        final thumbList = await MediaSyncProtocol.getMediaThumbList(
-          conn,
-          _currentPage, // refresh current page
-          _itemsPerPage,
-        );
-        print('ServerTab: Received ${thumbList.length} thumbnails');
+        print('${timestamp()} ServerTab: Requesting thumbnail list (HTTP) for page $_currentPage...');
+        List<http_api.MediaThumbItem> thumbList = const [];
+        try {
+          String phoneName = await DeviceManager.getLocalDeviceName();
+          final httpClient = http_api.HttpSyncClient(serverHost: server.ipAddress ?? '', serverPort: 8080, deviceName: phoneName);
+          thumbList = await httpClient.getMediaThumbnails(pageIndex: _currentPage, pageSize: _itemsPerPage);
+          httpClient.close();
+        } catch (e) {
+          print('${timestamp()} HTTP getMediaThumbnails failed: $e');
+          thumbList = const [];
+        }
+        print('${timestamp()} ServerTab: Received ${thumbList.length} thumbnails (HTTP)');
 
         if (!mounted) return;
         // Update the UI with the thumbnail data
         setState(() {
-          _mediaItems =
-              thumbList
-                  .map(
-                    (thumb) => ServerMediaItem(
-                      id: thumb.id,
-                      thumbData: thumb.thumbData,
-                      isVideo: thumb.isVideo,
-                    ),
-                  )
-                  .toList();
+          _mediaItems = thumbList.map((thumb) => ServerMediaItem(id: thumb.id, thumbData: thumb.thumbData, isVideo: thumb.isVideo)).toList();
           // Do not reset _currentPage here
           _loading = false;
         });
@@ -151,8 +107,7 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
 
       // Keep connection open for pagination
     } catch (e) {
-      print('Error refreshing gallery: $e');
-      _closeConnection(); // Close connection on error
+      print('${timestamp()} Error refreshing gallery: $e');
       if (!mounted) return;
       setState(() {
         _mediaItems = [];
@@ -181,36 +136,28 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
         return;
       }
 
-      // Reuse existing connection
-      final conn = await _ensureConnection();
-
-      // Request media thumbnail list for the specified page
-      final thumbList = await MediaSyncProtocol.getMediaThumbList(
-        conn,
-        pageIndex,
-        _itemsPerPage,
-      );
+      // Request media thumbnail list for the specified page via HTTP
+      List<http_api.MediaThumbItem> thumbList = const [];
+      try {
+        String phoneName = await DeviceManager.getLocalDeviceName();
+        final httpClient = http_api.HttpSyncClient(serverHost: server.ipAddress ?? '', serverPort: 8080, deviceName: phoneName);
+        thumbList = await httpClient.getMediaThumbnails(pageIndex: pageIndex, pageSize: _itemsPerPage);
+        httpClient.close();
+      } catch (e) {
+        print('${timestamp()} HTTP getMediaThumbnails (page) failed: $e');
+        thumbList = const [];
+      }
 
       if (!mounted) return;
 
       // Update the UI with the thumbnail data for this page
       setState(() {
-        _mediaItems =
-            thumbList
-                .map(
-                  (thumb) => ServerMediaItem(
-                    id: thumb.id,
-                    thumbData: thumb.thumbData,
-                    isVideo: thumb.isVideo,
-                  ),
-                )
-                .toList();
+        _mediaItems = thumbList.map((thumb) => ServerMediaItem(id: thumb.id, thumbData: thumb.thumbData, isVideo: thumb.isVideo)).toList();
         _currentPage = pageIndex;
         _loading = false;
       });
     } catch (e) {
-      print('Error loading page: $e');
-      _closeConnection(); // Close connection on error and will reconnect next time
+      print('${timestamp()} Error loading page: $e');
       if (!mounted) return;
       setState(() {
         _loading = false;
@@ -234,11 +181,15 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
     try {
       _showMessage('Syncing database with server...');
 
-      // Get connection
-      final conn = await _ensureConnection();
+      // Get device name
+      String phoneName = await DeviceManager.getLocalDeviceName();
+
+      // Create HTTP client
+      final httpClient = http_api.HttpSyncClient(serverHost: server.ipAddress ?? '', serverPort: 8080, deviceName: phoneName);
 
       // Get all file IDs from server
-      final serverFileIds = await MediaSyncProtocol.getAllServerFileIds(conn);
+      final serverFileIds = await httpClient.getAllServerFileIds();
+      httpClient.close();
 
       // Sync local database with server data
       final history = SyncHistory();
@@ -251,7 +202,7 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
       // Refresh the gallery after sync
       await _refreshGallery();
     } catch (e) {
-      print('Error syncing database: $e');
+      print('${timestamp()} Error syncing database: $e');
       if (!mounted) return;
       _showMessage('Error syncing database: ${e.toString()}');
     } finally {
@@ -265,45 +216,22 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
 
   void _showMessage(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message), duration: const Duration(seconds: 2)));
   }
 
-  /// Load all local media filenames using MediaSyncProtocol.getAssetFilename
-  Future<void> _loadLocalMediaFilenames() async {
-    if (_localMediaLoaded) return; // Already loaded
-
-    try {
-      print('Loading local media filenames using getAssetFilename...');
-      final assets = await MediaEnumerator.getAllLocalAssets();
-      final Set<String> filenames = {};
-
-      // Use MediaSyncProtocol.getAssetFilename to get consistent filenames
-      for (var asset in assets) {
-        try {
-          final filename = await MediaSyncProtocol.getAssetFilename(asset);
-          // Remove extension for comparison
-          final lastDot = filename.lastIndexOf('.');
-          if (lastDot > 0) {
-            final filenameWithoutExt = filename.substring(0, lastDot);
-            filenames.add(filenameWithoutExt);
+  /// Load local media filenames in background using cache
+  void _loadLocalMediaFilenames() {
+    // Load asynchronously without blocking UI
+    _mediaCache
+        .getLocalMediaFilenames()
+        .then((_) {
+          if (mounted) {
+            setState(() {}); // Trigger rebuild to show green checkmarks
           }
-        } catch (e) {
-          print('Error getting filename for asset: $e');
-        }
-      }
-
-      if (mounted) {
-        setState(() {
-          _localMediaFilenames = filenames;
-          _localMediaLoaded = true;
+        })
+        .catchError((e) {
+          print('${timestamp()} Error loading local media filenames: $e');
         });
-        print('Loaded ${filenames.length} local media filenames');
-      }
-    } catch (e) {
-      print('Error loading local media filenames: $e');
-    }
   }
 
   /// Check if a server file exists in local library by comparing filenames without extensions
@@ -315,7 +243,7 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
       filenameWithoutExt = serverFileId.substring(0, lastDot);
     }
 
-    return _localMediaFilenames.contains(filenameWithoutExt);
+    return _mediaCache.contains(filenameWithoutExt);
   }
 
   Widget _buildMediaWidget(ServerMediaItem item) {
@@ -326,18 +254,11 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
         return Image.memory(
           bytes,
           fit: BoxFit.cover,
-          errorBuilder:
-              (c, e, s) => Container(
-                color: Colors.grey[300],
-                child: const Center(child: Icon(Icons.broken_image)),
-              ),
+          errorBuilder: (c, e, s) => Container(color: Colors.grey[300], child: const Center(child: Icon(Icons.broken_image))),
         );
       } catch (e) {
-        print('Error decoding thumbnail: $e');
-        return Container(
-          color: Colors.grey[300],
-          child: const Center(child: Icon(Icons.broken_image)),
-        );
+        print('${timestamp()} Error decoding thumbnail: $e');
+        return Container(color: Colors.grey[300], child: const Center(child: Icon(Icons.broken_image)));
       }
     }
 
@@ -346,19 +267,12 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
       return Image.network(
         item.url!,
         fit: BoxFit.cover,
-        errorBuilder:
-            (c, e, s) => Container(
-              color: Colors.grey[300],
-              child: const Center(child: Icon(Icons.broken_image)),
-            ),
+        errorBuilder: (c, e, s) => Container(color: Colors.grey[300], child: const Center(child: Icon(Icons.broken_image))),
       );
     }
 
     // Default placeholder
-    return Container(
-      color: Colors.grey[300],
-      child: const Center(child: Icon(Icons.image, color: Colors.black45)),
-    );
+    return Container(color: Colors.grey[300], child: const Center(child: Icon(Icons.image, color: Colors.black45)));
   }
 
   @override
@@ -371,17 +285,12 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // When app goes to background, close the connection to avoid stale sockets
-    // When app resumes, refresh to recreate connection and reload current page
-    if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.detached) {
-      _closeConnection();
-    } else if (state == AppLifecycleState.resumed) {
+    // When app resumes, refresh to reload current page
+    if (state == AppLifecycleState.resumed) {
       // Delay slightly to let UI settle
       Future.microtask(() {
         if (mounted) {
-          // Try to reload the current page using a fresh connection
+          // Try to reload the current page
           if (_totalMediaCount > 0) {
             _loadPage(_currentPage);
           } else {
@@ -395,10 +304,8 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
   @override
   void didUpdateWidget(ServerTab oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // If the selected server changed, close the old connection and refresh
-    if (oldWidget.selectedServer?.deviceName !=
-        widget.selectedServer?.deviceName) {
-      _closeConnection();
+    // If the selected server changed, refresh
+    if (oldWidget.selectedServer?.deviceName != widget.selectedServer?.deviceName) {
       _refreshGallery();
     }
   }
@@ -406,7 +313,6 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _closeConnection();
     super.dispose();
   }
 
@@ -430,16 +336,10 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
                       ElevatedButton.icon(
                         onPressed: _loading ? null : _downloadSelected,
                         icon: const Icon(Icons.download, size: 16),
-                        label: const Text(
-                          'Download',
-                          style: TextStyle(fontSize: 12),
-                        ),
+                        label: const Text('Download', style: TextStyle(fontSize: 12)),
                         style: ElevatedButton.styleFrom(
                           minimumSize: const Size(80, 28),
-                          padding: const EdgeInsets.symmetric(
-                            vertical: 4,
-                            horizontal: 8,
-                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
                           backgroundColor: Colors.blue,
                           foregroundColor: Colors.white,
                         ),
@@ -448,32 +348,17 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
                     ElevatedButton.icon(
                       onPressed: _loading ? null : _refreshGallery,
                       icon: const Icon(Icons.refresh, size: 16),
-                      label: const Text(
-                        'Refresh',
-                        style: TextStyle(fontSize: 12),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(80, 28),
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 4,
-                          horizontal: 8,
-                        ),
-                      ),
+                      label: const Text('Refresh', style: TextStyle(fontSize: 12)),
+                      style: ElevatedButton.styleFrom(minimumSize: const Size(80, 28), padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8)),
                     ),
                     const SizedBox(width: 6),
                     ElevatedButton.icon(
                       onPressed: _loading ? null : _syncDatabaseWithServer,
                       icon: const Icon(Icons.sync, size: 16),
-                      label: const Text(
-                        'Sync DB',
-                        style: TextStyle(fontSize: 12),
-                      ),
+                      label: const Text('Sync DB', style: TextStyle(fontSize: 12)),
                       style: ElevatedButton.styleFrom(
                         minimumSize: const Size(80, 28),
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 4,
-                          horizontal: 8,
-                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
                         backgroundColor: Colors.orange.shade700,
                         foregroundColor: Colors.white,
                       ),
@@ -482,30 +367,17 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
                       const SizedBox(width: 10),
                       DropdownButton<int>(
                         value: _currentPage,
-                        items: List.generate(
-                          pageCount,
-                          (i) => DropdownMenuItem(
-                            value: i,
-                            child: Text(
-                              'Page ${i + 1}',
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                          ),
-                        ),
+                        items: List.generate(pageCount, (i) => DropdownMenuItem(value: i, child: Text('Page ${i + 1}', style: const TextStyle(fontSize: 12)))),
                         onChanged:
                             _loading
                                 ? null
                                 : (int? selected) {
-                                  if (selected != null &&
-                                      selected != _currentPage) {
+                                  if (selected != null && selected != _currentPage) {
                                     _loadPage(selected);
                                   }
                                 },
                         underline: Container(),
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Colors.black,
-                        ),
+                        style: const TextStyle(fontSize: 12, color: Colors.black),
                         isDense: true,
                       ),
                     ],
@@ -515,10 +387,7 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
               if (_totalMediaCount > 0)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    'Total: $_totalMediaCount items',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                  ),
+                  child: Text('Total: $_totalMediaCount items', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
                 ),
             ],
           ),
@@ -532,47 +401,26 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(
-                          Icons.photo_library_outlined,
-                          size: 64,
-                          color: Colors.grey[400],
-                        ),
+                        Icon(Icons.photo_library_outlined, size: 64, color: Colors.grey[400]),
                         const SizedBox(height: 16),
-                        Text(
-                          'No media on server',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: Colors.grey[600],
-                          ),
-                        ),
+                        Text('No media on server', style: TextStyle(fontSize: 16, color: Colors.grey[600])),
                         const SizedBox(height: 8),
-                        Text(
-                          'Select a server and tap Refresh',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey[500],
-                          ),
-                        ),
+                        Text('Select a server and tap Refresh', style: TextStyle(fontSize: 13, color: Colors.grey[500])),
                       ],
                     ),
                   )
                   : GridView.builder(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 3,
+                      mainAxisSpacing: 8,
+                      crossAxisSpacing: 8,
+                      childAspectRatio: 1,
                     ),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 3,
-                          mainAxisSpacing: 8,
-                          crossAxisSpacing: 8,
-                          childAspectRatio: 1,
-                        ),
                     itemCount: _mediaItems.length,
                     itemBuilder: (context, idx) {
                       final item = _mediaItems[idx];
-                      final isInLibrary =
-                          item.id != null && _isMediaInLocalLibrary(item.id!);
+                      final isInLibrary = item.id != null && _isMediaInLocalLibrary(item.id!);
                       final isSelected = _selectedIndexes.contains(idx);
                       return GestureDetector(
                         onTap:
@@ -589,43 +437,20 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
                                 : null,
                         child: Stack(
                           children: [
-                            Positioned.fill(
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: _buildMediaWidget(item),
-                              ),
-                            ),
+                            Positioned.fill(child: ClipRRect(borderRadius: BorderRadius.circular(8), child: _buildMediaWidget(item))),
                             if (item.isVideo)
                               Positioned(
                                 right: 4,
                                 bottom: 4,
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black.withOpacity(0.6),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(color: Colors.black.withOpacity(0.6), borderRadius: BorderRadius.circular(12)),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: const [
-                                      Icon(
-                                        Icons.videocam,
-                                        color: Colors.white,
-                                        size: 14,
-                                      ),
+                                      Icon(Icons.videocam, color: Colors.white, size: 14),
                                       SizedBox(width: 4),
-                                      Text(
-                                        'VIDEO',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
-                                          letterSpacing: 0.5,
-                                        ),
-                                      ),
+                                      Text('VIDEO', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
                                     ],
                                   ),
                                 ),
@@ -637,19 +462,8 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
                                 right: 4,
                                 child: Container(
                                   padding: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.green,
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: Colors.white,
-                                      width: 2,
-                                    ),
-                                  ),
-                                  child: const Icon(
-                                    Icons.check,
-                                    color: Colors.white,
-                                    size: 16,
-                                  ),
+                                  decoration: BoxDecoration(color: Colors.green, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
+                                  child: const Icon(Icons.check, color: Colors.white, size: 16),
                                 ),
                               ),
                             // Selection overlay for selected items
@@ -659,18 +473,9 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
                                   decoration: BoxDecoration(
                                     color: Colors.blue.withOpacity(0.3),
                                     borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: Colors.blue,
-                                      width: 2,
-                                    ),
+                                    border: Border.all(color: Colors.blue, width: 2),
                                   ),
-                                  child: const Center(
-                                    child: Icon(
-                                      Icons.check_circle,
-                                      color: Colors.blue,
-                                      size: 32,
-                                    ),
-                                  ),
+                                  child: const Center(child: Icon(Icons.check_circle, color: Colors.blue, size: 32)),
                                 ),
                               ),
                           ],
@@ -685,23 +490,11 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                IconButton(
-                  icon: const Icon(Icons.chevron_left),
-                  onPressed:
-                      _loading || _currentPage <= 0
-                          ? null
-                          : () => _loadPage(_currentPage - 1),
-                ),
-                Text(
-                  'Page ${_currentPage + 1} / $pageCount',
-                  style: const TextStyle(fontSize: 13),
-                ),
+                IconButton(icon: const Icon(Icons.chevron_left), onPressed: _loading || _currentPage <= 0 ? null : () => _loadPage(_currentPage - 1)),
+                Text('Page ${_currentPage + 1} / $pageCount', style: const TextStyle(fontSize: 13)),
                 IconButton(
                   icon: const Icon(Icons.chevron_right),
-                  onPressed:
-                      _loading || _currentPage >= pageCount - 1
-                          ? null
-                          : () => _loadPage(_currentPage + 1),
+                  onPressed: _loading || _currentPage >= pageCount - 1 ? null : () => _loadPage(_currentPage + 1),
                 ),
               ],
             ),
@@ -710,109 +503,17 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver {
     );
   }
 
-  // Download selected items (stub)
+  // Download selected items - TODO: Implement HTTP download endpoint
   Future<void> _downloadSelected() async {
     if (_selectedIndexes.isEmpty || _loading) return;
+
+    _showMessage('Download feature not yet implemented via HTTP');
+
+    // TODO: Implement HTTP-based download when server supports it
+    // For now, just show a message
     setState(() {
-      _loading = true;
+      _selectedIndexes.clear();
     });
-    try {
-      final conn = await _ensureConnection();
-      final idx = _selectedIndexes.first;
-      final item = _mediaItems[idx];
-      if (item.id == null) {
-        _showMessage('Invalid file id');
-        setState(() {
-          _loading = false;
-        });
-        return;
-      }
-      final fileId = item.id!;
-      final isVideo = item.isVideo;
-      _showMessage('Downloading ${isVideo ? "video" : "photo"}: $fileId');
-
-      // Send mediaDownloadList request (single file)
-      final requestList = jsonEncode([fileId]);
-      final packet = PacketEnc(
-        MediaSyncPacketType.mediaDownloadList,
-        utf8.encode(requestList),
-      );
-      await conn.sendData(packet.encode());
-
-      // Wait for server response
-      final responsePacket = await MediaSyncProtocol.waitForResponse(conn);
-      bool downloadSuccess = false;
-      if (!isVideo &&
-          responsePacket.type == MediaSyncPacketType.mediaDownloadAck) {
-        // Photo download: response is a JSON list of MediaPacket
-        final responseStr = utf8.decode(responsePacket.data);
-        final photoList = jsonDecode(responseStr) as List<dynamic>;
-        if (photoList.isNotEmpty && photoList[0] is Map<String, dynamic>) {
-          final photoMap = photoList[0] as Map<String, dynamic>;
-          final base64Data = photoMap[fileId] as String?;
-          if (base64Data != null) {
-            // final bytes = base64Decode(base64Data); // Uncomment and use if saving to file
-            // TODO: Save photo bytes to gallery or file system
-            _showMessage('Photo downloaded: $fileId');
-            downloadSuccess = true;
-          } else {
-            _showMessage('Photo data not found in response');
-          }
-        } else {
-          _showMessage('Invalid photo response format');
-        }
-      } else if (isVideo &&
-          responsePacket.type == MediaSyncPacketType.chunkedVideoStart) {
-        // Video download: handle chunked transfer
-        final startInfo =
-            jsonDecode(utf8.decode(responsePacket.data))
-                as Map<String, dynamic>;
-        final totalChunks = startInfo['totalChunks'] as int? ?? 0;
-        final videoId = startInfo['id'] as String? ?? fileId;
-        List<int> videoBytes = [];
-        for (int chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-          final chunkPacket = await MediaSyncProtocol.waitForResponse(conn);
-          if (chunkPacket.type != MediaSyncPacketType.chunkedVideoData) {
-            _showMessage('Unexpected packet type during video download');
-            break;
-          }
-          final chunkInfo =
-              jsonDecode(utf8.decode(chunkPacket.data)) as Map<String, dynamic>;
-          final base64Chunk = chunkInfo['data'] as String?;
-          if (base64Chunk != null) {
-            videoBytes.addAll(base64Decode(base64Chunk));
-          }
-          _showMessage('Downloaded chunk ${chunkIndex + 1}/$totalChunks');
-        }
-        // Wait for chunkedVideoComplete
-        final completePacket = await MediaSyncProtocol.waitForResponse(conn);
-        if (completePacket.type == MediaSyncPacketType.chunkedVideoComplete) {
-          // TODO: Save videoBytes to file system
-          _showMessage('Video downloaded: $videoId');
-          downloadSuccess = true;
-        } else {
-          _showMessage('Video download did not complete correctly');
-        }
-      } else {
-        _showMessage('Unexpected response type: ${responsePacket.type}');
-      }
-      // If download succeeded, add green marker by updating local media filenames
-      if (downloadSuccess && item.id != null) {
-        final lastDot = item.id!.lastIndexOf('.');
-        String filenameWithoutExt =
-            lastDot > 0 ? item.id!.substring(0, lastDot) : item.id!;
-        setState(() {
-          _localMediaFilenames.add(filenameWithoutExt);
-        });
-      }
-    } catch (e) {
-      _showMessage('Download error: $e');
-    } finally {
-      setState(() {
-        _selectedIndexes.clear();
-        _loading = false;
-      });
-    }
   }
 }
 

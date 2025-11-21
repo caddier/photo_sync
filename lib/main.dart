@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:photo_sync/device_finder.dart';
 import 'package:photo_sync/http_sync_client.dart';
+import 'package:photo_sync/http_media_sync_protocol.dart';
 import 'package:photo_sync/media_transport.dart';
 // QUIC disabled: using pure HTTP transport
-import 'package:photo_sync/http_media_sync_protocol.dart';
 import 'package:photo_sync/sync_history.dart';
 import 'package:photo_sync/media_eumerator.dart';
 import 'package:photo_sync/server_tab.dart';
@@ -11,6 +11,7 @@ import 'package:photo_sync/phone_tab.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:photo_sync/utils.dart';
 //dart:io will be used if/when we add platform-specific foreground service code
 // import 'dart:io' show Platform;
 
@@ -75,12 +76,12 @@ class _MainTabPageState extends State<MainTabPage> with SingleTickerProviderStat
   }
 
   void _updateServerName(String? serverName) {
-    print('DEBUG: _updateServerName called with: $serverName');
+    print('${timestamp()} DEBUG: _updateServerName called with: $serverName');
     if (mounted) {
       setState(() {
         _selectedServerName = serverName;
       });
-      print('DEBUG: _selectedServerName is now: $_selectedServerName');
+      print('${timestamp()} DEBUG: _selectedServerName is now: $_selectedServerName');
     }
   }
 
@@ -230,9 +231,9 @@ class _SyncPageState extends State<SyncPage> with AutomaticKeepAliveClientMixin,
   Future<void> _loadSyncCache() async {
     try {
       await history.loadSyncedFilesCache();
-      print('Sync cache loaded successfully at app start');
+      print('${timestamp()} Sync cache loaded successfully at app start');
     } catch (e) {
-      print('Error loading sync cache: $e');
+      print('${timestamp()} Error loading sync cache: $e');
     }
   }
 
@@ -250,7 +251,7 @@ class _SyncPageState extends State<SyncPage> with AutomaticKeepAliveClientMixin,
           _deviceNameController.text = systemName;
         });
       } catch (e) {
-        print('Failed to get system device name: $e');
+        print('${timestamp()} Failed to get system device name: $e');
       }
     }
   }
@@ -402,14 +403,14 @@ class _SyncPageState extends State<SyncPage> with AutomaticKeepAliveClientMixin,
           }
         },
         onError: (e) {
-          print('Discovery error: $e');
+          print('${timestamp()} Discovery error: $e');
         },
         onDone: () {
-          print('Discovery finished');
+          print('${timestamp()} Discovery finished');
         },
       );
     } catch (e) {
-      print('Error starting discovery: $e');
+      print('${timestamp()} Error starting discovery: $e');
     }
   }
 
@@ -422,15 +423,15 @@ class _SyncPageState extends State<SyncPage> with AutomaticKeepAliveClientMixin,
   }
 
   void selectServer(DeviceInfo server) {
-    print('DEBUG: selectServer called with: ${server.deviceName}');
+    print('${timestamp()} DEBUG: selectServer called with: ${server.deviceName}');
     setState(() {
       // Toggle selection: if the same server is clicked again, deselect it
       if (selectedServer?.deviceName == server.deviceName) {
         selectedServer = null;
-        print('DEBUG: Deselected server, calling callbacks with null');
+        print('${timestamp()} DEBUG: Deselected server, calling callbacks with null');
       } else {
         selectedServer = server;
-        print('DEBUG: Selected server: ${server.deviceName}, calling callbacks');
+        print('${timestamp()} DEBUG: Selected server: ${server.deviceName}, calling callbacks');
       }
     });
 
@@ -449,13 +450,15 @@ class _SyncPageState extends State<SyncPage> with AutomaticKeepAliveClientMixin,
     if (selectedServer == null) return Future.error('No server selected');
     final host = selectedServer!.ipAddress ?? '';
     MediaTransportClient transport;
-    print('[transport] Using HTTP transport...');
+    print('${timestamp()} [transport] Using HTTP transport...');
+    String phoneName = await DeviceManager.getLocalDeviceName();
     final httpClient = HttpTransportClient(
       HttpSyncClient(
         serverHost: host,
         serverPort: 8080,
         videoUploadRateLimitBytesPerSecond: kVideoUploadRateLimitBytesPerSecond,
         photoUploadRateLimitBytesPerSecond: kPhotoUploadRateLimitBytesPerSecond,
+        deviceName: phoneName,
       ),
     );
     final ok = await httpClient.testConnection();
@@ -464,8 +467,6 @@ class _SyncPageState extends State<SyncPage> with AutomaticKeepAliveClientMixin,
       throw Exception('Failed to connect via HTTP');
     }
     transport = httpClient;
-    String phoneName = await DeviceManager.getLocalDeviceName();
-    await transport.startSyncSession(phoneName);
     return transport;
   }
 
@@ -508,7 +509,7 @@ class _SyncPageState extends State<SyncPage> with AutomaticKeepAliveClientMixin,
             unsyncedAssets.add(asset);
           }
         } catch (e) {
-          print('Error checking asset ${asset.id}: $e');
+          print('${timestamp()} Error checking asset ${asset.id}: $e');
           unsyncedAssets.add(asset);
         }
         if ((i + 1) % 100 == 0) {
@@ -524,7 +525,7 @@ class _SyncPageState extends State<SyncPage> with AutomaticKeepAliveClientMixin,
       setState(() {
         _syncStatus = 'Found ${unsyncedAssets.length} new ${assetType}s to sync (already synced: $skippedFromCache)';
       });
-      print('Checked $totalCount files, found ${unsyncedAssets.length} unsynced, skipped $skippedFromCache');
+      print('${timestamp()} Checked $totalCount files, found ${unsyncedAssets.length} unsynced, skipped $skippedFromCache');
       if (unsyncedAssets.isEmpty) {
         setState(() {
           _syncStatus = 'All ${assetType}s already synced!';
@@ -551,7 +552,7 @@ class _SyncPageState extends State<SyncPage> with AutomaticKeepAliveClientMixin,
           try {
             fileId = await HttpMediaSyncProtocol.getAssetFilename(asset); // still reuse filename logic
           } catch (e) {
-            print('Filename error: $e');
+            print('${timestamp()} Filename error: $e');
             continue;
           }
           if (history.isFileSyncedCached(fileId)) {
@@ -574,23 +575,23 @@ class _SyncPageState extends State<SyncPage> with AutomaticKeepAliveClientMixin,
                 },
               );
             } catch (e) {
-              print('[sync] video upload error: $e');
+              print('${timestamp()} [sync] video upload error: $e');
               success = false;
             }
           } else {
             try {
               success = await client.uploadPhoto(asset: asset, shouldCancel: () => _cancelSync);
             } catch (e) {
-              print('[sync] photo upload error: $e');
+              print('${timestamp()} [sync] photo upload error: $e');
               success = false;
             }
           }
           if (success) {
             await history.recordSync(fileId, assetType);
             await _loadSyncedCounts();
-            print('Synced $assetType $fileId');
+            print('${timestamp()} Synced $assetType $fileId');
           } else {
-            print('Failed after retry $assetType $fileId');
+            print('${timestamp()} Failed after retry $assetType $fileId');
           }
           if (type == RequestType.video && !_cancelSync) {
             await Future.delayed(const Duration(milliseconds: 200));
@@ -602,23 +603,16 @@ class _SyncPageState extends State<SyncPage> with AutomaticKeepAliveClientMixin,
       }
     } catch (e) {
       if (!_cancelSync) {
-        print('Error in $assetType sync: $e');
+        print('${timestamp()} Error in $assetType sync: $e');
         _showErrorToast(context, 'Error syncing $assetType: $e');
       }
     } finally {
-      if (client != null && createdClient && !_cancelSync) {
-        try {
-          await client.endSyncSession();
-        } catch (e) {
-          print('End sync session failed: $e');
-        }
-      }
       if (client != null && createdClient) {
         try {
           // Safe close; QUIC close is lightweight (we skip mid-attempt disposal above).
           client.close();
         } catch (e) {
-          print('Close client error: $e');
+          print('${timestamp()} Close client error: $e');
         }
       }
       _activeClient = null;
@@ -723,7 +717,7 @@ class _SyncPageState extends State<SyncPage> with AutomaticKeepAliveClientMixin,
       }
     } catch (e) {
       _showErrorToast(context, 'Error during sync: ${e.toString()}');
-      print('Error in sync all: $e');
+      print('${timestamp()} Error in sync all: $e');
     }
   }
 
@@ -741,7 +735,7 @@ class _SyncPageState extends State<SyncPage> with AutomaticKeepAliveClientMixin,
       }
     } catch (e) {
       _showErrorToast(context, 'Error resuming sync: ${e.toString()}');
-      print('Error in _resumeSyncAll: $e');
+      print('${timestamp()} Error in _resumeSyncAll: $e');
     }
   }
 
@@ -767,7 +761,7 @@ class _SyncPageState extends State<SyncPage> with AutomaticKeepAliveClientMixin,
                     Icon(_deviceNameLocked ? Icons.lock : Icons.phone_android, size: 20, color: Theme.of(context).primaryColor),
                     const SizedBox(width: 6),
                     Text(
-                      "My Phone Name:",
+                      "Phone Name:",
                       style: Theme.of(
                         context,
                       ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Theme.of(context).primaryColor, fontSize: 12),
@@ -817,22 +811,6 @@ class _SyncPageState extends State<SyncPage> with AutomaticKeepAliveClientMixin,
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.wifi_find, size: 18, color: Theme.of(context).primaryColor),
-                            const SizedBox(width: 6),
-                            Text(
-                              "Server Discovery",
-                              style: Theme.of(
-                                context,
-                              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Theme.of(context).primaryColor, fontSize: 12),
-                            ),
-                          ],
-                        ),
-                      ),
                       Center(
                         child: ElevatedButton(
                           onPressed: discoverServers,
@@ -854,22 +832,26 @@ class _SyncPageState extends State<SyncPage> with AutomaticKeepAliveClientMixin,
               Card(
                 margin: const EdgeInsets.symmetric(horizontal: 8),
                 elevation: 2,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: Colors.green.shade400, width: 2)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: Colors.green.shade400, width: 1.5)),
                 child: Padding(
-                  padding: const EdgeInsets.all(8),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children:
                         discoveredServers.map((server) {
-                          return Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Checkbox(
-                                value: selectedServer?.deviceName == server.deviceName,
-                                onChanged: (_) => selectServer(server),
-                                visualDensity: VisualDensity.compact,
-                              ),
-                              Text(server.deviceName, style: const TextStyle(fontSize: 13)),
-                            ],
+                          return IntrinsicHeight(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Checkbox(
+                                  value: selectedServer?.deviceName == server.deviceName,
+                                  onChanged: (_) => selectServer(server),
+                                  visualDensity: VisualDensity.compact,
+                                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                Text(server.deviceName, style: const TextStyle(fontSize: 13)),
+                              ],
+                            ),
                           );
                         }).toList(),
                   ),

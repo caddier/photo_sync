@@ -1,23 +1,16 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import 'package:photo_sync/utils.dart';
 
 class SyncRecord {
   final String fileId;
   final String mediaType;
   final DateTime syncedTime;
 
-  SyncRecord({
-    required this.fileId,
-    required this.mediaType,
-    required this.syncedTime,
-  });
+  SyncRecord({required this.fileId, required this.mediaType, required this.syncedTime});
 
   factory SyncRecord.fromMap(Map<String, dynamic> map) {
-    return SyncRecord(
-      fileId: map['file_id'] as String,
-      mediaType: map['file_type'] as String,
-      syncedTime: DateTime.parse(map['synced_time'] as String),
-    );
+    return SyncRecord(fileId: map['file_id'] as String, mediaType: map['file_type'] as String, syncedTime: DateTime.parse(map['synced_time'] as String));
   }
 }
 
@@ -28,7 +21,7 @@ class SyncHistory {
   SyncHistory._internal();
 
   Database? _db;
-  
+
   // Cache for synced file IDs
   Set<String>? _syncedFileIdsCache;
   Set<String>? _syncedFileIdsWithoutExtCache;
@@ -84,45 +77,34 @@ class SyncHistory {
   /// Also normalizes / to _ since file paths may contain /L0/001 but DB stores with _
   Future<bool> isFileSynced(String fileId) async {
     final db = await database;
-    
-    
+
     // Normalize the fileId by replacing / with _
     final normalizedFileId = fileId.replaceAll('/', '_');
-    
+
     // First try exact match with normalized ID
-    final exactResult = await db.query(
-      'sync_history',
-      where: 'file_id = ?',
-      whereArgs: [normalizedFileId],
-      limit: 1,
-    );
+    final exactResult = await db.query('sync_history', where: 'file_id = ?', whereArgs: [normalizedFileId], limit: 1);
     if (exactResult.isNotEmpty) {
-      print('[SyncHistory] Exact match found for normalized: $normalizedFileId');
+      print('${timestamp()} [SyncHistory] Exact match found for normalized: $normalizedFileId');
       return true;
     }
-    
+
     // Also try original fileId for backward compatibility
-    final exactResultOriginal = await db.query(
-      'sync_history',
-      where: 'file_id = ?',
-      whereArgs: [fileId],
-      limit: 1,
-    );
+    final exactResultOriginal = await db.query('sync_history', where: 'file_id = ?', whereArgs: [fileId], limit: 1);
     if (exactResultOriginal.isNotEmpty) {
-      print('[SyncHistory] Exact match found for original: $fileId');
+      print('${timestamp()} [SyncHistory] Exact match found for original: $fileId');
       return true;
     }
-    
+
     // If no exact match, try matching by filename without extension (normalized)
     final filenameWithoutExt = _getFilenameWithoutExt(normalizedFileId);
-    
+
     final allRecords = await db.query('sync_history', columns: ['file_id']);
-    
+
     for (final record in allRecords) {
       final recordFileId = record['file_id'] as String;
       final recordFilenameWithoutExt = _getFilenameWithoutExt(recordFileId);
       if (recordFilenameWithoutExt == filenameWithoutExt) {
-        print('[SyncHistory] Match found! $normalizedFileId matches DB record $recordFileId');
+        print('${timestamp()} [SyncHistory] Match found! $normalizedFileId matches DB record $recordFileId');
         return true;
       }
     }
@@ -135,14 +117,15 @@ class SyncHistory {
     try {
       final db = await database;
       final records = await db.query('sync_history', columns: ['file_id', 'file_type']);
-      
+
       // Always initialize the sets, even if empty
       _syncedFileIdsCache = records.map((r) => r['file_id'] as String).toSet();
-      _syncedFileIdsWithoutExtCache = records.map((r) {
-        final fileId = r['file_id'] as String;
-        return _getFilenameWithoutExt(fileId);
-      }).toSet();
-      
+      _syncedFileIdsWithoutExtCache =
+          records.map((r) {
+            final fileId = r['file_id'] as String;
+            return _getFilenameWithoutExt(fileId);
+          }).toSet();
+
       // Count photos and videos separately
       _syncedPhotoCount = 0;
       _syncedVideoCount = 0;
@@ -155,11 +138,11 @@ class SyncHistory {
           _syncedPhotoCount++;
         }
       }
-      
-      print('[SyncHistory] Cache loaded: ${_syncedFileIdsCache!.length} files ($_syncedPhotoCount photos, $_syncedVideoCount videos)');
+
+      print('${timestamp()} [SyncHistory] Cache loaded: ${_syncedFileIdsCache!.length} files ($_syncedPhotoCount photos, $_syncedVideoCount videos)');
     } catch (e) {
       // If error occurs, initialize empty sets to prevent null errors
-      print('[SyncHistory] Error loading cache: $e - initializing empty cache');
+      print('${timestamp()} [SyncHistory] Error loading cache: $e - initializing empty cache');
       _syncedFileIdsCache = {};
       _syncedFileIdsWithoutExtCache = {};
       _syncedPhotoCount = 0;
@@ -173,8 +156,8 @@ class SyncHistory {
   bool isFileSyncedCached(String fileId) {
     // Auto-load cache if not initialized (defensive programming)
     if (_syncedFileIdsCache == null || _syncedFileIdsWithoutExtCache == null) {
-      print('[SyncHistory] WARNING: Cache not loaded when checking $fileId. Auto-initializing empty cache.');
-      print('[SyncHistory] Please call loadSyncedFilesCache() before sync operations for better performance.');
+      print('${timestamp()} [SyncHistory] WARNING: Cache not loaded when checking $fileId. Auto-initializing empty cache.');
+      print('${timestamp()} [SyncHistory] Please call loadSyncedFilesCache() before sync operations for better performance.');
       // Initialize empty cache to prevent crashes
       _syncedFileIdsCache = {};
       _syncedFileIdsWithoutExtCache = {};
@@ -182,24 +165,24 @@ class SyncHistory {
       _syncedVideoCount = 0;
       // Schedule async load for next check
       loadSyncedFilesCache().catchError((e) {
-        print('[SyncHistory] Error auto-loading cache: $e');
+        print('${timestamp()} [SyncHistory] Error auto-loading cache: $e');
       });
       return false; // First check will always return false, but cache will be ready for next check
     }
-    
+
     // Normalize the fileId by replacing / with _
     final normalizedFileId = fileId.replaceAll('/', '_');
-    
+
     // First try exact match with normalized ID
     if (_syncedFileIdsCache!.contains(normalizedFileId)) {
       return true;
     }
-    
+
     // Also try original fileId for backward compatibility
     if (_syncedFileIdsCache!.contains(fileId)) {
       return true;
     }
-    
+
     // Try matching by filename without extension (normalized)
     final filenameWithoutExt = _getFilenameWithoutExt(normalizedFileId);
     return _syncedFileIdsWithoutExtCache!.contains(filenameWithoutExt);
@@ -211,7 +194,7 @@ class SyncHistory {
     _syncedFileIdsWithoutExtCache = null;
     _syncedPhotoCount = 0;
     _syncedVideoCount = 0;
-    print('[SyncHistory] Cache cleared');
+    print('${timestamp()} [SyncHistory] Cache cleared');
   }
 
   /// Get the total number of synced files from cache
@@ -238,23 +221,19 @@ class SyncHistory {
     final db = await database;
     // Normalize fileId by replacing / with _
     final normalizedFileId = fileId.replaceAll('/', '_');
-    print('[SyncHistory] Recording sync: $normalizedFileId');
-    
-    await db.insert(
-      'sync_history',
-      {
-        'file_id': normalizedFileId,
-        'file_type': fileType,
-        'synced_time': DateTime.now().toIso8601String(),
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
-    
+    print('${timestamp()} [SyncHistory] Recording sync: $normalizedFileId');
+
+    await db.insert('sync_history', {
+      'file_id': normalizedFileId,
+      'file_type': fileType,
+      'synced_time': DateTime.now().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+
     // Reload cache instead of just clearing it to keep it available for ongoing sync
     try {
       await loadSyncedFilesCache();
     } catch (e) {
-      print('[SyncHistory] Error reloading cache after recordSync: $e');
+      print('${timestamp()} [SyncHistory] Error reloading cache after recordSync: $e');
       // Don't throw - the record was saved, cache will be reloaded eventually
     }
   }
@@ -289,10 +268,7 @@ class SyncHistory {
 
   Future<int> getCountByFileType(String fileType) async {
     final db = await database;
-    final result = await db.rawQuery(
-      'SELECT COUNT(*) as count FROM sync_history WHERE file_type = ?',
-      [fileType],
-    );
+    final result = await db.rawQuery('SELECT COUNT(*) as count FROM sync_history WHERE file_type = ?', [fileType]);
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
@@ -311,12 +287,9 @@ class SyncHistory {
       // Delete existing device name
       await db.delete('device_info');
       // Insert new device name
-      await db.insert('device_info', {
-        'device_name': deviceName,
-        'updated_time': DateTime.now().toIso8601String(),
-      });
+      await db.insert('device_info', {'device_name': deviceName, 'updated_time': DateTime.now().toIso8601String()});
     } catch (e) {
-      print('Error saving device name to database: $e');
+      print('${timestamp()} Error saving device name to database: $e');
       rethrow;
     }
   }
@@ -329,7 +302,7 @@ class SyncHistory {
       if (result.isEmpty) return null;
       return result.first['device_name'] as String?;
     } catch (e) {
-      print('Error getting device name from database: $e');
+      print('${timestamp()} Error getting device name from database: $e');
       return null;
     }
   }
@@ -342,7 +315,7 @@ class SyncHistory {
       final count = Sqflite.firstIntValue(result) ?? 0;
       return count > 0;
     } catch (e) {
-      print('Error checking sync history: $e');
+      print('${timestamp()} Error checking sync history: $e');
       return false;
     }
   }
@@ -353,18 +326,18 @@ class SyncHistory {
   Future<void> syncWithServer(List<String> serverFileIds) async {
     try {
       final db = await database;
-      
+
       // Get all file IDs from local database
       final localRecords = await db.query('sync_history', columns: ['file_id', 'file_type']);
       final localFileIds = localRecords.map((record) => record['file_id'] as String).toList();
-      
+
       // Server filenames already have no extensions - use them directly as a set
       // Local filenames have extensions - we'll strip them when comparing
       final serverFilenamesSet = serverFileIds.toSet();
-      
-      print('Sync DB: Server has ${serverFileIds.length} files');
-      print('Sync DB: Local DB has ${localFileIds.length} records');
-      
+
+      print('${timestamp()} Sync DB: Server has ${serverFileIds.length} files');
+      print('${timestamp()} Sync DB: Local DB has ${localFileIds.length} records');
+
       // Count by type
       int localPhotos = 0;
       int localVideos = 0;
@@ -373,33 +346,33 @@ class SyncHistory {
         if (fileType == 'photo') localPhotos++;
         if (fileType == 'video') localVideos++;
       }
-      print('Sync DB: Local has $localPhotos photos, $localVideos videos');
-      
+      print('${timestamp()} Sync DB: Local has $localPhotos photos, $localVideos videos');
+
       // Sample server files
       final serverPhotos = serverFileIds.where((id) => id.contains('IMG_')).length;
       final serverVideos = serverFileIds.where((id) => id.contains('VID_')).length;
-      print('Sync DB: Server has $serverPhotos IMG_ files, $serverVideos VID_ files');
-      
+      print('${timestamp()} Sync DB: Server has $serverPhotos IMG_ files, $serverVideos VID_ files');
+
       // Show sample server video files
       final sampleServerVideos = serverFileIds.where((id) => id.contains('VID_')).take(3).toList();
       if (sampleServerVideos.isNotEmpty) {
-        print('Sample server videos: ${sampleServerVideos.join(', ')}');
+        print('${timestamp()} Sample server videos: ${sampleServerVideos.join(', ')}');
       }
-      
+
       // Show sample local video files
       final localVideoRecords = localRecords.where((r) => r['file_type'] == 'video').take(3).toList();
       if (localVideoRecords.isNotEmpty) {
         final sampleLocalVideos = localVideoRecords.map((r) => r['file_id'] as String).toList();
-        print('Sample local videos: ${sampleLocalVideos.join(', ')}');
+        print('${timestamp()} Sample local videos: ${sampleLocalVideos.join(', ')}');
         // Show what they look like without extension
         final withoutExt = sampleLocalVideos.map((id) => _getFilenameWithoutExt(id)).join(', ');
-        print('Local videos without ext: $withoutExt');
+        print('${timestamp()} Local videos without ext: $withoutExt');
       }
-      
+
       // Find records that exist in database but not on server (need to delete)
       final toDelete = <String>[];
       final matched = <String>[];
-      
+
       for (final localFileId in localFileIds) {
         final localFilenameWithoutExt = _getFilenameWithoutExt(localFileId);
         // Server filenames already have no extension, compare directly
@@ -409,7 +382,7 @@ class SyncHistory {
           matched.add(localFileId);
         }
       }
-      
+
       // Count matched files by type
       int matchedPhotos = 0;
       int matchedVideos = 0;
@@ -421,37 +394,37 @@ class SyncHistory {
           if (fileType == 'video') matchedVideos++;
         }
       }
-      print('Sync DB: Matched $matchedPhotos photos, $matchedVideos videos');
-      
+      print('${timestamp()} Sync DB: Matched $matchedPhotos photos, $matchedVideos videos');
+
       if (toDelete.isNotEmpty) {
-        print('Removing ${toDelete.length} records that no longer exist on server');
+        print('${timestamp()} Removing ${toDelete.length} records that no longer exist on server');
         // Sample what's being deleted
         final sampleDeletes = toDelete.take(5).join(', ');
-        print('Sample deletes: $sampleDeletes');
-        
+        print('${timestamp()} Sample deletes: $sampleDeletes');
+
         for (final fileId in toDelete) {
           await db.delete('sync_history', where: 'file_id = ?', whereArgs: [fileId]);
         }
       }
-      
-      print('Database sync complete: removed ${toDelete.length} orphaned records');
-      
+
+      print('${timestamp()} Database sync complete: removed ${toDelete.length} orphaned records');
+
       // Clear cache since database changed
       if (toDelete.isNotEmpty) {
         clearCache();
       }
     } catch (e) {
-      print('Error syncing database with server: $e');
+      print('${timestamp()} Error syncing database with server: $e');
       rethrow;
     }
   }
-  
+
   /// Extract filename without extension for matching
   /// E.g., "IMG_123.jpg" -> "IMG_123", "VID_456.mp4" -> "VID_456"
   String _getFilenameWithoutExt(String fileId) {
     final lastDotIndex = fileId.lastIndexOf('.');
     if (lastDotIndex == -1) {
-      print('[SyncHistory] _getFilenameWithoutExt($fileId) -> $fileId (no extension)');
+      print('${timestamp()} [SyncHistory] _getFilenameWithoutExt($fileId) -> $fileId (no extension)');
       return fileId;
     }
     final result = fileId.substring(0, lastDotIndex);

@@ -21,6 +21,9 @@ class HttpSyncClient {
   /// Optional rate limit for photo uploads (bytes per second). Null = unlimited.
   int? photoUploadRateLimitBytesPerSecond;
 
+  /// Device name provided directly (no explicit start/end session calls).
+  final String? deviceName;
+
   String get baseUrl => 'http://$serverHost:$serverPort';
 
   HttpSyncClient({
@@ -29,6 +32,7 @@ class HttpSyncClient {
     http.Client? httpClient,
     this.videoUploadRateLimitBytesPerSecond,
     this.photoUploadRateLimitBytesPerSecond,
+    this.deviceName,
   }) : _httpClient = httpClient ?? http.Client();
 
   /// Get formatted timestamp for logging
@@ -56,43 +60,16 @@ class HttpSyncClient {
     }
   }
 
-  /// Start sync session with device name
-  ///
-  /// This notifies the server about which device is syncing
-  Future<bool> startSyncSession(String deviceName) async {
-    try {
-      final response = await _httpClient
-          .post(Uri.parse('$baseUrl/api/sync/start'), headers: {'Content-Type': 'application/json'}, body: jsonEncode({'deviceName': deviceName}))
-          .timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        print('${_timestamp()} Sync session started for device: $deviceName');
-        return true;
-      } else {
-        print('${_timestamp()} Failed to start sync session: ${response.statusCode}');
-        return false;
-      }
-    } catch (e) {
-      print('${_timestamp()} Error starting sync session: $e');
-      return false;
-    }
-  }
-
-  /// End sync session
-  Future<void> endSyncSession() async {
-    try {
-      await _httpClient.post(Uri.parse('$baseUrl/api/sync/end')).timeout(const Duration(seconds: 5));
-
-      print('${_timestamp()} Sync session ended');
-    } catch (e) {
-      print('${_timestamp()} Error ending sync session: $e');
-    }
-  }
+  // startSyncSession/endSyncSession removed; deviceName now passed via constructor.
 
   /// Get total media count from server
   Future<int> getMediaCount() async {
     try {
-      final response = await _httpClient.get(Uri.parse('$baseUrl/api/media/count')).timeout(const Duration(seconds: 10));
+      Uri uri = Uri.parse('$baseUrl/api/media/count');
+      if (deviceName != null && deviceName!.isNotEmpty) {
+        uri = uri.replace(queryParameters: {'deviceName': deviceName!});
+      }
+      final response = await _httpClient.get(uri).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -113,7 +90,12 @@ class HttpSyncClient {
   /// [pageSize] - Number of items per page
   Future<List<MediaThumbItem>> getMediaThumbnails({required int pageIndex, required int pageSize}) async {
     try {
-      final uri = Uri.parse('$baseUrl/api/media/thumbnails').replace(queryParameters: {'page': pageIndex.toString(), 'pageSize': pageSize.toString()});
+      final params = {
+        'page': pageIndex.toString(),
+        'pageSize': pageSize.toString(),
+        if (deviceName != null && deviceName!.isNotEmpty) 'deviceName': deviceName!,
+      };
+      final uri = Uri.parse('$baseUrl/api/media/thumbnails').replace(queryParameters: params);
 
       final response = await _httpClient.get(uri).timeout(const Duration(seconds: 30));
 
@@ -227,6 +209,9 @@ class HttpSyncClient {
       // Add metadata
       request.fields['fileId'] = fileId;
       request.fields['mediaType'] = mediaType;
+      if (deviceName != null && deviceName!.isNotEmpty) {
+        request.fields['deviceName'] = deviceName!;
+      }
 
       // Send with timeout using a dedicated client we can close on cancel
       // Adjust timeout when throttling is active
@@ -429,6 +414,9 @@ class HttpSyncClient {
       request.fields['fileId'] = fileId;
       request.fields['mediaType'] = mediaType;
       request.fields['fileSize'] = fileSize.toString();
+      if (deviceName != null && deviceName!.isNotEmpty) {
+        request.fields['deviceName'] = deviceName!;
+      }
 
       // Add file as streaming multipart with cancellation + progress
       int sent = 0;

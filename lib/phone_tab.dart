@@ -2,7 +2,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:photo_sync/sync_history.dart';
-import 'package:photo_sync/media_sync_protocol.dart';
+import 'package:photo_sync/http_media_sync_protocol.dart';
 
 class PhoneTab extends StatefulWidget {
   const PhoneTab({super.key});
@@ -72,9 +72,7 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
       final permission = await PhotoManager.requestPermissionExtend();
       if (!permission.isAuth) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Permission denied. Cannot load photos.')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Permission denied. Cannot load photos.')));
         setState(() => _loadingPhotos = false);
         return;
       }
@@ -98,9 +96,7 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
     } catch (e) {
       if (!mounted) return;
       setState(() => _loadingPhotos = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load photos: $e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to load photos: $e')));
     }
   }
 
@@ -135,15 +131,13 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
     } catch (e) {
       if (!mounted) return;
       setState(() => _loadingVideos = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load videos: $e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to load videos: $e')));
     }
   }
 
   Future<void> _loadPhotoSyncedStatus() async {
     if (_loadingPhotoSyncStatus) return;
-    
+
     // Optimization: If we've already found all synced photos, skip checking
     final totalSyncedPhotosInDb = _history.getSyncedPhotoCount();
     if (totalSyncedPhotosInDb > 0 && _syncedPhotos.length >= totalSyncedPhotosInDb) {
@@ -154,42 +148,44 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
       }
       return;
     }
-    
+
     setState(() => _loadingPhotoSyncStatus = true);
-    
+
     try {
       final syncedIds = <String>{};
-      
+
       // Check all displayed photos in parallel for better performance
-      await Future.wait(_displayedPhotos.map((a) async {
-        // Check cache first
-        if (_photoSyncStatusCache.containsKey(a.id)) {
-          if (_photoSyncStatusCache[a.id]!) {
+      await Future.wait(
+        _displayedPhotos.map((a) async {
+          // Check cache first
+          if (_photoSyncStatusCache.containsKey(a.id)) {
+            if (_photoSyncStatusCache[a.id]!) {
+              syncedIds.add(a.id);
+            }
+            return;
+          }
+
+          // Get filename (cache it too)
+          String assetFilename;
+          if (_photoFilenameCache.containsKey(a.id)) {
+            assetFilename = _photoFilenameCache[a.id]!;
+          } else {
+            assetFilename = await HttpMediaSyncProtocol.getAssetFilename(a);
+            _photoFilenameCache[a.id] = assetFilename;
+          }
+
+          // Check sync status using cached database lookup
+          final isSynced = _history.isFileSyncedCached(assetFilename);
+
+          // Store in cache
+          _photoSyncStatusCache[a.id] = isSynced;
+
+          if (isSynced) {
             syncedIds.add(a.id);
           }
-          return;
-        }
-        
-        // Get filename (cache it too)
-        String assetFilename;
-        if (_photoFilenameCache.containsKey(a.id)) {
-          assetFilename = _photoFilenameCache[a.id]!;
-        } else {
-          assetFilename = await MediaSyncProtocol.getAssetFilename(a);
-          _photoFilenameCache[a.id] = assetFilename;
-        }
-        
-        // Check sync status using cached database lookup
-        final isSynced = _history.isFileSyncedCached(assetFilename);
-        
-        // Store in cache
-        _photoSyncStatusCache[a.id] = isSynced;
-        
-        if (isSynced) {
-          syncedIds.add(a.id);
-        }
-      }));
-      
+        }),
+      );
+
       if (!mounted) return;
       setState(() {
         // Only update the synced status for displayed photos, preserve others
@@ -206,7 +202,7 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
 
   Future<void> _loadVideoSyncedStatus() async {
     if (_loadingVideoSyncStatus) return;
-    
+
     // Optimization: If we've already found all synced videos, skip checking
     final totalSyncedVideosInDb = _history.getSyncedVideoCount();
     if (totalSyncedVideosInDb > 0 && _syncedVideos.length >= totalSyncedVideosInDb) {
@@ -217,42 +213,44 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
       }
       return;
     }
-    
+
     setState(() => _loadingVideoSyncStatus = true);
-    
+
     try {
       final syncedIds = <String>{};
-      
+
       // Check all displayed videos in parallel for better performance
-      await Future.wait(_displayedVideos.map((a) async {
-        // Check cache first
-        if (_videoSyncStatusCache.containsKey(a.id)) {
-          if (_videoSyncStatusCache[a.id]!) {
+      await Future.wait(
+        _displayedVideos.map((a) async {
+          // Check cache first
+          if (_videoSyncStatusCache.containsKey(a.id)) {
+            if (_videoSyncStatusCache[a.id]!) {
+              syncedIds.add(a.id);
+            }
+            return;
+          }
+
+          // Get filename (cache it too)
+          String assetFilename;
+          if (_videoFilenameCache.containsKey(a.id)) {
+            assetFilename = _videoFilenameCache[a.id]!;
+          } else {
+            assetFilename = await HttpMediaSyncProtocol.getAssetFilename(a);
+            _videoFilenameCache[a.id] = assetFilename;
+          }
+
+          // Check sync status using cached database lookup
+          final isSynced = _history.isFileSyncedCached(assetFilename);
+
+          // Store in cache
+          _videoSyncStatusCache[a.id] = isSynced;
+
+          if (isSynced) {
             syncedIds.add(a.id);
           }
-          return;
-        }
-        
-        // Get filename (cache it too)
-        String assetFilename;
-        if (_videoFilenameCache.containsKey(a.id)) {
-          assetFilename = _videoFilenameCache[a.id]!;
-        } else {
-          assetFilename = await MediaSyncProtocol.getAssetFilename(a);
-          _videoFilenameCache[a.id] = assetFilename;
-        }
-        
-        // Check sync status using cached database lookup
-        final isSynced = _history.isFileSyncedCached(assetFilename);
-        
-        // Store in cache
-        _videoSyncStatusCache[a.id] = isSynced;
-        
-        if (isSynced) {
-          syncedIds.add(a.id);
-        }
-      }));
-      
+        }),
+      );
+
       if (!mounted) return;
       setState(() {
         // Only update the synced status for displayed videos, preserve others
@@ -280,15 +278,11 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
   }
 
   Future<Uint8List?> _getPhotoThumb(AssetEntity a) {
-    return _photoThumbCache[a.id] ??= a.thumbnailDataWithSize(
-      const ThumbnailSize.square(200),
-    );
+    return _photoThumbCache[a.id] ??= a.thumbnailDataWithSize(const ThumbnailSize.square(200));
   }
 
   Future<Uint8List?> _getVideoThumb(AssetEntity a) {
-    return _videoThumbCache[a.id] ??= a.thumbnailDataWithSize(
-      const ThumbnailSize.square(200),
-    );
+    return _videoThumbCache[a.id] ??= a.thumbnailDataWithSize(const ThumbnailSize.square(200));
   }
 
   // Photo toggle methods
@@ -339,17 +333,15 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
     final count = toDelete.length;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete Selected'),
-        content: Text('Delete $count selected photo${count > 1 ? 's' : ''}? This cannot be undone.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('Delete Selected'),
+            content: Text('Delete $count selected photo${count > 1 ? 's' : ''}? This cannot be undone.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+              TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Delete', style: TextStyle(color: Colors.red))),
+            ],
           ),
-        ],
-      ),
     );
     if (confirmed != true) return;
 
@@ -368,17 +360,12 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
 
       await _loadPhotos();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Deleted ${deletedIds.length} photo${deletedIds.length == 1 ? '' : 's'}'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Deleted ${deletedIds.length} photo${deletedIds.length == 1 ? '' : 's'}'), backgroundColor: Colors.green));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error deleting: $e'), backgroundColor: Colors.red),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error deleting: $e'), backgroundColor: Colors.red));
     }
   }
 
@@ -388,17 +375,15 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
     final count = toDelete.length;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete Selected'),
-        content: Text('Delete $count selected video${count > 1 ? 's' : ''}? This cannot be undone.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('Delete Selected'),
+            content: Text('Delete $count selected video${count > 1 ? 's' : ''}? This cannot be undone.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+              TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Delete', style: TextStyle(color: Colors.red))),
+            ],
           ),
-        ],
-      ),
     );
     if (confirmed != true) return;
 
@@ -417,17 +402,12 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
 
       await _loadVideos();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Deleted ${deletedIds.length} video${deletedIds.length == 1 ? '' : 's'}'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Deleted ${deletedIds.length} video${deletedIds.length == 1 ? '' : 's'}'), backgroundColor: Colors.green));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error deleting: $e'), backgroundColor: Colors.red),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error deleting: $e'), backgroundColor: Colors.red));
     }
   }
 
@@ -436,14 +416,14 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
       _currentPhotoPage = index;
       _updateDisplayedPhotos();
     });
-    
+
     // Check if we've already found all synced photos
     final totalSyncedPhotosInDb = _history.getSyncedPhotoCount();
     if (totalSyncedPhotosInDb > 0 && _syncedPhotos.length >= totalSyncedPhotosInDb) {
       // Skip loading sync status - we've already found all synced items
       return;
     }
-    
+
     // Load sync status for the new page
     _loadPhotoSyncedStatus();
   }
@@ -453,14 +433,14 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
       _currentVideoPage = index;
       _updateDisplayedVideos();
     });
-    
+
     // Check if we've already found all synced videos
     final totalSyncedVideosInDb = _history.getSyncedVideoCount();
     if (totalSyncedVideosInDb > 0 && _syncedVideos.length >= totalSyncedVideosInDb) {
       // Skip loading sync status - we've already found all synced items
       return;
     }
-    
+
     // Load sync status for the new page
     _loadVideoSyncedStatus();
   }
@@ -490,28 +470,16 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
                   future: getThumb(asset),
                   builder: (context, snapshot) {
                     if (snapshot.hasData && snapshot.data != null) {
-                      return Image.memory(
-                        snapshot.data!,
-                        fit: BoxFit.cover,
-                        gaplessPlayback: true,
-                      );
+                      return Image.memory(snapshot.data!, fit: BoxFit.cover, gaplessPlayback: true);
                     }
-                    return Container(
-                      color: Colors.grey[300],
-                      child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-                    );
+                    return Container(color: Colors.grey[300], child: const Center(child: CircularProgressIndicator(strokeWidth: 2)));
                   },
                 ),
               ),
             ),
 
             // Video indicator
-            if (isVideo)
-              const Positioned(
-                bottom: 4,
-                right: 4,
-                child: Icon(Icons.play_circle_filled, color: Colors.white, size: 24),
-              ),
+            if (isVideo) const Positioned(bottom: 4, right: 4, child: Icon(Icons.play_circle_filled, color: Colors.white, size: 24)),
 
             // Selection overlay
             if (isSelected)
@@ -529,10 +497,7 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
             if (inDeleteMode)
               Positioned.fill(
                 child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(8),
-                    color: Colors.black.withOpacity(0.5),
-                  ),
+                  decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), color: Colors.black.withOpacity(0.5)),
                   child: Center(
                     child: GestureDetector(
                       onTap: onTap,
@@ -553,16 +518,8 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
                 right: 4,
                 child: Container(
                   padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: Colors.green,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 2),
-                  ),
-                  child: const Icon(
-                    Icons.check,
-                    color: Colors.white,
-                    size: 16,
-                  ),
+                  decoration: BoxDecoration(color: Colors.green, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
+                  child: const Icon(Icons.check, color: Colors.white, size: 16),
                 ),
               ),
 
@@ -571,11 +528,7 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
               Positioned(
                 top: 4,
                 left: 4,
-                child: Icon(
-                  isSelected ? Icons.check_circle : Icons.circle_outlined,
-                  color: isSelected ? Colors.blue : Colors.white,
-                  size: 24,
-                ),
+                child: Icon(isSelected ? Icons.check_circle : Icons.circle_outlined, color: isSelected ? Colors.blue : Colors.white, size: 24),
               ),
           ],
         ),
@@ -599,8 +552,7 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text('${_selectedPhotos.length} selected', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
-              if (_allPhotos.isNotEmpty)
-                Text('Total: ${_allPhotos.length}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              if (_allPhotos.isNotEmpty) Text('Total: ${_allPhotos.length}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
               if (_selectedPhotos.isNotEmpty || _deletePhotos.isNotEmpty)
                 Row(
                   children: [
@@ -616,10 +568,7 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
                     const SizedBox(width: 8),
                     TextButton(
                       onPressed: _deleteSelectedPhotos,
-                      child: Text(
-                        'Delete (${_selectedPhotos.length + _deletePhotos.length})',
-                        style: const TextStyle(fontSize: 13, color: Colors.red),
-                      ),
+                      child: Text('Delete (${_selectedPhotos.length + _deletePhotos.length})', style: const TextStyle(fontSize: 13, color: Colors.red)),
                     ),
                   ],
                 ),
@@ -631,11 +580,7 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
         Expanded(
           child: GridView.builder(
             padding: const EdgeInsets.symmetric(horizontal: 8),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 8,
-            ),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, mainAxisSpacing: 8, crossAxisSpacing: 8),
             itemCount: _displayedPhotos.length,
             itemBuilder: (context, index) {
               final asset = _displayedPhotos[index];
@@ -663,10 +608,7 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                IconButton(
-                  icon: const Icon(Icons.chevron_left),
-                  onPressed: _currentPhotoPage > 0 ? () => _goToPhotoPage(_currentPhotoPage - 1) : null,
-                ),
+                IconButton(icon: const Icon(Icons.chevron_left), onPressed: _currentPhotoPage > 0 ? () => _goToPhotoPage(_currentPhotoPage - 1) : null),
                 Text('Page ${_currentPhotoPage + 1} / $pageCount', style: const TextStyle(fontSize: 13)),
                 IconButton(
                   icon: const Icon(Icons.chevron_right),
@@ -695,8 +637,7 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text('${_selectedVideos.length} selected', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
-              if (_allVideos.isNotEmpty)
-                Text('Total: ${_allVideos.length}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              if (_allVideos.isNotEmpty) Text('Total: ${_allVideos.length}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
               if (_selectedVideos.isNotEmpty || _deleteVideos.isNotEmpty)
                 Row(
                   children: [
@@ -712,10 +653,7 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
                     const SizedBox(width: 8),
                     TextButton(
                       onPressed: _deleteSelectedVideos,
-                      child: Text(
-                        'Delete (${_selectedVideos.length + _deleteVideos.length})',
-                        style: const TextStyle(fontSize: 13, color: Colors.red),
-                      ),
+                      child: Text('Delete (${_selectedVideos.length + _deleteVideos.length})', style: const TextStyle(fontSize: 13, color: Colors.red)),
                     ),
                   ],
                 ),
@@ -727,11 +665,7 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
         Expanded(
           child: GridView.builder(
             padding: const EdgeInsets.symmetric(horizontal: 8),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 8,
-            ),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, mainAxisSpacing: 8, crossAxisSpacing: 8),
             itemCount: _displayedVideos.length,
             itemBuilder: (context, index) {
               final asset = _displayedVideos[index];
@@ -760,10 +694,7 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                IconButton(
-                  icon: const Icon(Icons.chevron_left),
-                  onPressed: _currentVideoPage > 0 ? () => _goToVideoPage(_currentVideoPage - 1) : null,
-                ),
+                IconButton(icon: const Icon(Icons.chevron_left), onPressed: _currentVideoPage > 0 ? () => _goToVideoPage(_currentVideoPage - 1) : null),
                 Text('Page ${_currentVideoPage + 1} / $pageCount', style: const TextStyle(fontSize: 13)),
                 IconButton(
                   icon: const Icon(Icons.chevron_right),
@@ -785,28 +716,12 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
           children: [
             TabBar(
               controller: _tabController,
-              tabs: const [
-                Tab(text: 'Photos', icon: Icon(Icons.photo)),
-                Tab(text: 'Videos', icon: Icon(Icons.video_library)),
-              ],
+              tabs: const [Tab(text: 'Photos', icon: Icon(Icons.photo)), Tab(text: 'Videos', icon: Icon(Icons.video_library))],
             ),
-            if (_loadingPhotoSyncStatus || _loadingVideoSyncStatus)
-              const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
+            if (_loadingPhotoSyncStatus || _loadingVideoSyncStatus) const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
           ],
         ),
-        Expanded(
-          child: TabBarView(
-            controller: _tabController,
-            children: [
-              _buildPhotoGallery(),
-              _buildVideoGallery(),
-            ],
-          ),
-        ),
+        Expanded(child: TabBarView(controller: _tabController, children: [_buildPhotoGallery(), _buildVideoGallery()])),
       ],
     );
   }

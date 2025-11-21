@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:async';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:photo_sync/sync_history.dart';
+import 'package:photo_sync/utils.dart';
 
 //server suppose to listen on TCP Port 9922 for incoming connections
 //server also need to listen on udp port 7799 for discovery requests
@@ -21,7 +22,7 @@ class DeviceManager {
     //"photo_server:$name,IP:$ip"
     var devices = <DeviceInfo>[];
     for (var response in responses) {
-      print('Discovered device response: $response');
+      print('${timestamp()} Discovered device response: $response');
       var deviceName = 'Unknown';
       var ipAddress = 'Unknown';
       var parts = response.split(',');
@@ -70,7 +71,7 @@ class DeviceManager {
       0, // system-assigned port
     );
 
-    print('UDP socket bound to ${socket.address.address}:${socket.port}');
+    print('${timestamp()} UDP socket bound to ${socket.address.address}:${socket.port}');
 
     // 2. Enable broadcast
     socket.broadcastEnabled = true;
@@ -80,14 +81,14 @@ class DeviceManager {
 
     // 4. Get broadcast address
     var ipAndMask = await getIpAndMask();
-    print('Local IP: ${ipAndMask["ip"]}, Mask: ${ipAndMask["mask"]}');
+    print('${timestamp()} Local IP: ${ipAndMask["ip"]}, Mask: ${ipAndMask["mask"]}');
     String localIp = ipAndMask["ip"] ?? '255.255.255.255';
     String mask = ipAndMask["mask"] ?? '255.255.255.0';
     String broadcastAddress = calculateBroadcastAddress(localIp, mask);
 
     // 5. Send broadcast
     socket.send(data, InternetAddress(broadcastAddress), port);
-    print('UDP broadcast sent to $broadcastAddress:$port');
+    print('${timestamp()} UDP broadcast sent to $broadcastAddress:$port');
 
     // // 6. Prepare a completer to collect responses
     // final completer = Completer<List<String>>();
@@ -100,7 +101,7 @@ class DeviceManager {
         if (dg != null) {
           final msg = String.fromCharCodes(dg.data);
           final from = dg.address.address;
-          print('Received: $msg from $from:${dg.port}');
+          print('${timestamp()} Received: $msg from $from:${dg.port}');
           responses.add(msg);
         }
       }
@@ -153,9 +154,7 @@ class DeviceManager {
                     ipAddress = part.substring('IP:'.length);
                   }
                 }
-                controller!.add(
-                  DeviceInfo(deviceName: deviceName, ipAddress: ipAddress),
-                );
+                controller!.add(DeviceInfo(deviceName: deviceName, ipAddress: ipAddress));
               }
             }
           });
@@ -198,7 +197,7 @@ class DeviceManager {
         return savedName;
       }
     } catch (e) {
-      print('Error getting device name from database: $e');
+      print('${timestamp()} Error getting device name from database: $e');
     }
 
     if (Platform.isAndroid) {
