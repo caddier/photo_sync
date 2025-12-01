@@ -170,11 +170,8 @@ class SyncHistory {
       return false; // First check will always return false, but cache will be ready for next check
     }
 
-    // Normalize the fileId by replacing / with _
-    final normalizedFileId = fileId.replaceAll('/', '_');
-
     // First try exact match with normalized ID
-    if (_syncedFileIdsCache!.contains(normalizedFileId)) {
+    if (_syncedFileIdsCache!.contains(fileId)) {
       return true;
     }
 
@@ -184,7 +181,7 @@ class SyncHistory {
     }
 
     // Try matching by filename without extension (normalized)
-    final filenameWithoutExt = _getFilenameWithoutExt(normalizedFileId);
+    final filenameWithoutExt = _getFilenameWithoutExt(fileId);
     return _syncedFileIdsWithoutExtCache!.contains(filenameWithoutExt);
   }
 
@@ -330,6 +327,22 @@ class SyncHistory {
       // Get all file IDs from local database
       final localRecords = await db.query('sync_history', columns: ['file_id', 'file_type']);
       final localFileIds = localRecords.map((record) => record['file_id'] as String).toList();
+
+      // SAFETY CHECK: If server returns empty/few files but we have many local records,
+      // this is likely a network error or server issue - don't wipe the database!
+      if (serverFileIds.isEmpty && localFileIds.isNotEmpty) {
+        print('${timestamp()} WARNING: Server returned 0 files but local DB has ${localFileIds.length} records.');
+        print('${timestamp()} Skipping sync to prevent accidental data loss. Server may be unreachable.');
+        return;
+      }
+
+      // Additional safety: If we would delete more than 90% of records, abort
+      // This protects against partial server responses
+      if (localFileIds.isNotEmpty && serverFileIds.length < localFileIds.length * 0.1) {
+        print('${timestamp()} WARNING: Server has ${serverFileIds.length} files, local has ${localFileIds.length}.');
+        print('${timestamp()} This would delete >90% of records. Aborting sync to prevent data loss.');
+        return;
+      }
 
       // Server filenames already have no extensions - use them directly as a set
       // Local filenames have extensions - we'll strip them when comparing

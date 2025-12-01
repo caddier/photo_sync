@@ -575,6 +575,11 @@ class _SyncPageState extends State<SyncPage> with AutomaticKeepAliveClientMixin,
                 },
               );
             } catch (e) {
+              if (mounted) {
+                setState(() {
+                  _syncStatus = 'Error uploading video ${i + 1}/${unsyncedAssets.length}';
+                });
+              }
               print('${timestamp()} [sync] video upload error: $e');
               success = false;
             }
@@ -582,6 +587,11 @@ class _SyncPageState extends State<SyncPage> with AutomaticKeepAliveClientMixin,
             try {
               success = await client.uploadPhoto(asset: asset, shouldCancel: () => _cancelSync);
             } catch (e) {
+              if (mounted) {
+                setState(() {
+                  _syncStatus = 'Error uploading photo ${i + 1}/${unsyncedAssets.length} error $e';
+                });
+              }
               print('${timestamp()} [sync] photo upload error: $e');
               success = false;
             }
@@ -609,7 +619,7 @@ class _SyncPageState extends State<SyncPage> with AutomaticKeepAliveClientMixin,
     } finally {
       if (client != null && createdClient) {
         try {
-          // Safe close; QUIC close is lightweight (we skip mid-attempt disposal above).
+          // Safe close;
           client.close();
         } catch (e) {
           print('${timestamp()} Close client error: $e');

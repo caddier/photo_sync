@@ -134,7 +134,8 @@ class HttpSyncClient {
       return allFileIds;
     } catch (e) {
       print('${_timestamp()} Error getting all server file IDs: $e');
-      return [];
+      // Rethrow instead of returning empty list to prevent accidental database wipe
+      rethrow;
     }
   }
 
@@ -362,9 +363,17 @@ class HttpSyncClient {
     });
     try {
       final request = http.MultipartRequest('POST', Uri.parse('$baseUrl/api/media/upload/video'));
-      request.files.add(http.MultipartFile('file', stream, fileSize, filename: fileId));
+
+      // Add metadata fields FIRST (before file) - server expects deviceName before file data
       request.fields['fileId'] = fileId;
       request.fields['mediaType'] = mediaType;
+      request.fields['fileSize'] = fileSize.toString();
+      if (deviceName != null && deviceName!.isNotEmpty) {
+        request.fields['deviceName'] = deviceName!;
+      }
+
+      // Add file as streaming multipart
+      request.files.add(http.MultipartFile('file', stream, fileSize, filename: fileId));
 
       // Adjust timeout based on rate limit if present
       Duration timeout = const Duration(seconds: 120);

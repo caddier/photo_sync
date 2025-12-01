@@ -46,6 +46,14 @@ class DeviceManager {
     String? ip = await info.getWifiIP();
     String? mask = await info.getWifiSubmask();
 
+    // Check for link-local address (169.254.x.x) which indicates no valid DHCP lease
+    if (ip != null && ip.startsWith('169.254.')) {
+      print('${timestamp()} [DeviceManager] WARNING: Got link-local IP ($ip) - device may not have valid network connection');
+      print('${timestamp()} [DeviceManager] Try: 1) Toggle WiFi off/on, 2) Wait for DHCP, 3) Check network permissions');
+      // Return null to indicate invalid network state
+      return {"ip": null, "mask": null};
+    }
+
     return {"ip": ip, "mask": mask};
   }
 
@@ -82,8 +90,16 @@ class DeviceManager {
     // 4. Get broadcast address
     var ipAndMask = await getIpAndMask();
     print('${timestamp()} Local IP: ${ipAndMask["ip"]}, Mask: ${ipAndMask["mask"]}');
-    String localIp = ipAndMask["ip"] ?? '255.255.255.255';
+    String? localIp = ipAndMask["ip"];
     String mask = ipAndMask["mask"] ?? '255.255.255.0';
+
+    // Check if we got a valid IP address
+    if (localIp == null || localIp.startsWith('169.254.')) {
+      print('${timestamp()} [DeviceManager] No valid WiFi IP available (got link-local or null). Make sure you are connected to WiFi.');
+      socket.close();
+      return [];
+    }
+
     String broadcastAddress = calculateBroadcastAddress(localIp, mask);
 
     // 5. Send broadcast
@@ -132,11 +148,41 @@ class DeviceManager {
           final data = Uint8List.fromList('who is photo server?'.codeUnits);
 
           var ipAndMask = await getIpAndMask();
-          String localIp = ipAndMask["ip"] ?? '255.255.255.255';
-          String mask = ipAndMask["mask"] ?? '255.255.255.0';
-          String broadcastAddress = calculateBroadcastAddress(localIp, mask);
+          String? localIp = ipAndMask["ip"];
+          String? mask = ipAndMask["mask"];
 
-          socket!.send(data, InternetAddress(broadcastAddress), 7799);
+          // Check if we have a valid IP address
+          if (localIp == null || mask == null) {
+            print('${timestamp()} [DeviceManager] Cannot discover servers: No valid network connection');
+            print('${timestamp()} [DeviceManager] Please check WiFi connection and try again');
+            try {
+              socket?.close();
+            } catch (_) {}
+            try {
+              controller?.close();
+            } catch (_) {}
+            return;
+          }
+
+          String broadcastAddress = calculateBroadcastAddress(localIp, mask);
+          print('${timestamp()} [DeviceManager] Sending discovery broadcast to $broadcastAddress:7799');
+
+          // Wrap send in try-catch to handle network errors gracefully
+          try {
+            socket!.send(data, InternetAddress(broadcastAddress), 7799);
+          } catch (e) {
+            print('${timestamp()} [DeviceManager] Failed to send discovery broadcast: $e');
+            print('${timestamp()} [DeviceManager] This may be due to network configuration issues.');
+            print('${timestamp()} [DeviceManager] Try: 1) Toggle WiFi off/on, 2) Check Local Network permission, 3) Disable Private WiFi Address');
+            // Don't crash - just close and return empty results
+            try {
+              socket?.close();
+            } catch (_) {}
+            try {
+              controller?.close();
+            } catch (_) {}
+            return;
+          }
 
           socket!.listen((RawSocketEvent event) {
             if (event == RawSocketEvent.read) {
