@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:photo_sync/device_finder.dart';
 import 'package:photo_sync/http_sync_client.dart' as http_api;
-import 'package:photo_sync/sync_history.dart';
 import 'package:photo_sync/local_media_cache.dart';
 import 'package:photo_sync/utils.dart';
 
@@ -168,55 +167,6 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver, Auto
     }
   }
 
-  Future<void> _syncDatabaseWithServer() async {
-    if (_loading) return;
-
-    final server = widget.selectedServer;
-    if (server == null) {
-      _showMessage('Please select a server first');
-      return;
-    }
-
-    setState(() {
-      _loading = true;
-    });
-
-    try {
-      _showMessage('Syncing database with server...');
-
-      // Get device name
-      String phoneName = await DeviceManager.getLocalDeviceName();
-
-      // Create HTTP client
-      final httpClient = http_api.HttpSyncClient(serverHost: server.ipAddress ?? '', serverPort: 8080, deviceName: phoneName);
-
-      // Get all file IDs from server
-      final serverFileIds = await httpClient.getAllServerFileIds();
-      httpClient.close();
-
-      // Sync local database with server data
-      final history = SyncHistory();
-      await history.syncWithServer(serverFileIds);
-
-      if (!mounted) return;
-
-      _showMessage('Database synced: ${serverFileIds.length} files on server');
-
-      // Refresh the gallery after sync
-      await _refreshGallery();
-    } catch (e) {
-      print('${timestamp()} Error syncing database: $e');
-      if (!mounted) return;
-      _showMessage('Error syncing database: ${e.toString()}');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-        });
-      }
-    }
-  }
-
   void _showMessage(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message), duration: const Duration(seconds: 2)));
@@ -356,18 +306,6 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver, Auto
                       icon: const Icon(Icons.refresh, size: 16),
                       label: const Text('Refresh', style: TextStyle(fontSize: 12)),
                       style: ElevatedButton.styleFrom(minimumSize: const Size(80, 28), padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8)),
-                    ),
-                    const SizedBox(width: 6),
-                    ElevatedButton.icon(
-                      onPressed: _loading ? null : _syncDatabaseWithServer,
-                      icon: const Icon(Icons.sync, size: 16),
-                      label: const Text('Sync DB', style: TextStyle(fontSize: 12)),
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(80, 28),
-                        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-                        backgroundColor: Colors.orange.shade700,
-                        foregroundColor: Colors.white,
-                      ),
                     ),
                     if (pageCount > 1) ...[
                       const SizedBox(width: 10),

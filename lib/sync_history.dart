@@ -172,17 +172,25 @@ class SyncHistory {
 
     // First try exact match with normalized ID
     if (_syncedFileIdsCache!.contains(fileId)) {
-      return true;
-    }
-
-    // Also try original fileId for backward compatibility
-    if (_syncedFileIdsCache!.contains(fileId)) {
+      //print('${timestamp()} [SyncHistory] isFileSyncedCached($fileId) -> TRUE (exact match)');
       return true;
     }
 
     // Try matching by filename without extension (normalized)
     final filenameWithoutExt = _getFilenameWithoutExt(fileId);
-    return _syncedFileIdsWithoutExtCache!.contains(filenameWithoutExt);
+    final matched = _syncedFileIdsWithoutExtCache!.contains(filenameWithoutExt);
+
+    // Debug logging for video files
+    if (fileId.startsWith('VID_')) {
+      //print('${timestamp()} [SyncHistory] isFileSyncedCached($fileId) -> filenameWithoutExt=$filenameWithoutExt, matched=$matched');
+      if (!matched && _syncedFileIdsWithoutExtCache!.isNotEmpty) {
+        // Show some cached values for comparison
+        final sampleCached = _syncedFileIdsWithoutExtCache!.where((s) => s.startsWith('VID_')).take(3).toList();
+        //print('${timestamp()} [SyncHistory] Sample cached video IDs: $sampleCached');
+      }
+    }
+
+    return matched;
   }
 
   /// Clear the cache (call when records are added or deleted)

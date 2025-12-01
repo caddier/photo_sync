@@ -73,6 +73,12 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
     final videoCount = _history.getSyncedVideoCount();
     print('${timestamp()} [PhoneTab] Cache refreshed: $photoCount photos, $videoCount videos synced');
 
+    // Clear local sync status caches to force re-checking against fresh database data
+    _photoSyncStatusCache.clear();
+    _videoSyncStatusCache.clear();
+    _syncedPhotos.clear();
+    _syncedVideos.clear();
+
     // Reload sync status for currently displayed items
     if (_tabController.index == 0 && _displayedPhotos.isNotEmpty) {
       _loadPhotoSyncedStatus();
@@ -217,10 +223,10 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
           // Check sync status using cached database lookup
           final isSynced = _history.isFileSyncedCached(assetFilename);
 
-          // Debug: log the first few checks
-          if (syncedIds.length < 3) {
-            print('${timestamp()} [PhoneTab] Checking photo: $assetFilename, isSynced: $isSynced');
-          }
+          // // Debug: log the first few checks
+          // if (syncedIds.length < 3) {
+          //   print('${timestamp()} [PhoneTab] Checking photo: $assetFilename, isSynced: $isSynced');
+          // }
 
           // Store in cache
           _photoSyncStatusCache[a.id] = isSynced;
@@ -250,6 +256,8 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
 
     // Optimization: If we've already found all synced videos, skip checking
     final totalSyncedVideosInDb = _history.getSyncedVideoCount();
+    print('${timestamp()} [PhoneTab] _loadVideoSyncedStatus: totalSyncedVideosInDb=$totalSyncedVideosInDb, _syncedVideos.length=${_syncedVideos.length}');
+
     if (totalSyncedVideosInDb > 0 && _syncedVideos.length >= totalSyncedVideosInDb) {
       // We've already found all synced items, no need to check more
       // Ensure loading state is false
@@ -287,11 +295,6 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
           // Check sync status using cached database lookup
           final isSynced = _history.isFileSyncedCached(assetFilename);
 
-          // Debug: log the first few checks
-          if (syncedIds.length < 3) {
-            print('${timestamp()} [PhoneTab] Checking video: $assetFilename, isSynced: $isSynced');
-          }
-
           // Store in cache
           _videoSyncStatusCache[a.id] = isSynced;
 
@@ -300,6 +303,8 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
           }
         }),
       );
+
+      print('${timestamp()} [PhoneTab] _loadVideoSyncedStatus: found ${syncedIds.length} synced videos on this page');
 
       if (!mounted) return;
       setState(() {
@@ -310,6 +315,7 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
         _loadingVideoSyncStatus = false;
       });
     } catch (e) {
+      print('${timestamp()} [PhoneTab] Error in _loadVideoSyncedStatus: $e');
       if (!mounted) return;
       setState(() => _loadingVideoSyncStatus = false);
     }
