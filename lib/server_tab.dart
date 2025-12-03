@@ -238,8 +238,12 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver, Auto
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // When app resumes, refresh to reload current page
+    // When app resumes, refresh to reload current page and clear cache
     if (state == AppLifecycleState.resumed) {
+      // Reload local media cache since user may have deleted photos
+      _mediaCache.clear();
+      _loadLocalMediaFilenames();
+      
       // Delay slightly to let UI settle
       Future.microtask(() {
         if (mounted) {
@@ -257,11 +261,22 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver, Auto
   @override
   void didUpdateWidget(ServerTab oldWidget) {
     super.didUpdateWidget(oldWidget);
+    
+    // Reload local media cache when widget updates (e.g., tab switch)
+    // This ensures green checkmarks reflect current local library state
+    _mediaCache.clear();
+    _loadLocalMediaFilenames();
+    
     // If the selected server changed, refresh but preserve page if same server
     if (oldWidget.selectedServer?.deviceName != widget.selectedServer?.deviceName || oldWidget.selectedServer?.ipAddress != widget.selectedServer?.ipAddress) {
       // Server actually changed, reset to page 0 and refresh
       _currentPage = 0;
       _refreshGallery();
+    } else {
+      // Same server but widget updated (likely from tab switch) - trigger UI rebuild to show updated checkmarks
+      if (mounted) {
+        setState(() {});
+      }
     }
   }
 
