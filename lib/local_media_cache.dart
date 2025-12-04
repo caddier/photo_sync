@@ -13,6 +13,7 @@ class LocalMediaCache {
   LocalMediaCache._internal();
 
   Set<String> _localMediaFilenames = {};
+  Set<String> _manuallyAddedFilenames = {}; // Track filenames added via addFilename()
   bool _isLoaded = false;
   bool _isLoading = false;
   DateTime? _lastLoadTime;
@@ -67,12 +68,16 @@ class LocalMediaCache {
         }
       }
 
+      // Merge with manually added filenames (from recent downloads)
+      // This preserves entries that may not be visible to PhotoManager yet
+      filenames.addAll(_manuallyAddedFilenames);
+
       _localMediaFilenames = filenames;
       _isLoaded = true;
       _lastLoadTime = DateTime.now();
       _isLoading = false;
 
-      print('${timestamp()} LocalMediaCache: Loaded ${filenames.length} local media filenames');
+      print('${timestamp()} LocalMediaCache: Loaded ${filenames.length} local media filenames (includes ${_manuallyAddedFilenames.length} manually added)');
       return _localMediaFilenames;
     } catch (e) {
       print('${timestamp()} LocalMediaCache: Error loading filenames: $e');
@@ -82,8 +87,11 @@ class LocalMediaCache {
   }
 
   /// Add a filename to the cache (e.g., after download)
+  /// This also tracks the filename separately so it persists through cache reloads
   void addFilename(String filenameWithoutExt) {
     _localMediaFilenames.add(filenameWithoutExt);
+    _manuallyAddedFilenames.add(filenameWithoutExt);
+    print('${timestamp()} LocalMediaCache: Manually added $filenameWithoutExt (total manual: ${_manuallyAddedFilenames.length})');
   }
 
   /// Check if a filename exists in cache
@@ -96,9 +104,19 @@ class LocalMediaCache {
     return await getLocalMediaFilenames(forceReload: true);
   }
 
-  /// Clear cache
+  /// Clear cache (keeps manually added filenames)
   void clear() {
     _localMediaFilenames.clear();
+    // Don't clear _manuallyAddedFilenames - these should persist until fullClear()
+    _isLoaded = false;
+    _lastLoadTime = null;
+  }
+
+  /// Full clear including manually added filenames
+  /// Use this only when you want to completely reset the cache
+  void fullClear() {
+    _localMediaFilenames.clear();
+    _manuallyAddedFilenames.clear();
     _isLoaded = false;
     _lastLoadTime = null;
   }

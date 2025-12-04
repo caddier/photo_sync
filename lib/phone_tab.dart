@@ -767,12 +767,16 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
   Widget build(BuildContext context) {
     super.build(context); // Required for AutomaticKeepAliveClientMixin
 
-    // Check if we need to refresh sync status (when tab becomes visible after being away)
+    // Check if we need to refresh when tab becomes visible after being away
     final now = DateTime.now();
-    if (_lastSyncCheck == null || now.difference(_lastSyncCheck!).inSeconds > 2) {
+    if (_lastSyncCheck == null || now.difference(_lastSyncCheck!).inSeconds > 3) {
       _lastSyncCheck = now;
-      // Refresh sync status in the background
-      Future.microtask(() => _refreshSyncStatus());
+      // Reload photos and videos to pick up any newly downloaded files
+      // Also refresh sync status in the background
+      Future.microtask(() async {
+        await _loadPhotos();
+        await _loadVideos();
+      });
     }
 
     return Column(

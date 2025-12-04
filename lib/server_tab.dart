@@ -1,5 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'package:photo_manager/photo_manager.dart';
 import 'package:photo_sync/device_finder.dart';
 import 'package:photo_sync/http_sync_client.dart' as http_api;
 import 'package:photo_sync/local_media_cache.dart';
@@ -238,11 +242,12 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver, Auto
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // When app resumes, refresh to reload current page and clear cache
+    // When app resumes, refresh local media cache and reload current page
     if (state == AppLifecycleState.resumed) {
-      // Reload local media cache since user may have deleted photos
-      _mediaCache.clear();
-      _loadLocalMediaFilenames();
+      // Reload local media cache since user may have deleted photos in another app
+      _mediaCache.reload().then((_) {
+        if (mounted) setState(() {});
+      });
       
       // Delay slightly to let UI settle
       Future.microtask(() {
@@ -262,21 +267,15 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver, Auto
   void didUpdateWidget(ServerTab oldWidget) {
     super.didUpdateWidget(oldWidget);
     
-    // Reload local media cache when widget updates (e.g., tab switch)
-    // This ensures green checkmarks reflect current local library state
-    _mediaCache.clear();
-    _loadLocalMediaFilenames();
-    
     // If the selected server changed, refresh but preserve page if same server
     if (oldWidget.selectedServer?.deviceName != widget.selectedServer?.deviceName || oldWidget.selectedServer?.ipAddress != widget.selectedServer?.ipAddress) {
       // Server actually changed, reset to page 0 and refresh
+      // Also reload local media cache for the new server context
+      _mediaCache.reload().then((_) {
+        if (mounted) setState(() {});
+      });
       _currentPage = 0;
       _refreshGallery();
-    } else {
-      // Same server but widget updated (likely from tab switch) - trigger UI rebuild to show updated checkmarks
-      if (mounted) {
-        setState(() {});
-      }
     }
   }
 
@@ -289,6 +288,7 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver, Auto
   @override
   Widget build(BuildContext context) {
     super.build(context); // Required for AutomaticKeepAliveClientMixin
+    
     // Calculate total number of pages based on total media count from server
     final pageCount = (_totalMediaCount / _itemsPerPage).ceil();
 
@@ -462,17 +462,161 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver, Auto
     );
   }
 
-  // Download selected items - TODO: Implement HTTP download endpoint
+  // Download selected items from server
   Future<void> _downloadSelected() async {
     if (_selectedIndexes.isEmpty || _loading) return;
 
-    _showMessage('Download feature not yet implemented via HTTP');
+    final server = widget.selectedServer;
+    if (server == null || server.ipAddress == null) {
+      _showMessage('No server selected');
+      return;
+    }
 
-    // TODO: Implement HTTP-based download when server supports it
-    // For now, just show a message
     setState(() {
-      _selectedIndexes.clear();
+      _loading = true;
     });
+
+    int successCount = 0;
+    int failCount = 0;
+    final totalCount = _selectedIndexes.length;
+
+    try {
+      // Get device name (folder name on server)
+      final deviceName = await DeviceManager.getLocalDeviceName();
+      final baseUrl = 'http://${server.ipAddress}:8080';
+
+      for (final idx in _selectedIndexes.toList()) {
+        if (idx >= _mediaItems.length) continue;
+
+        final item = _mediaItems[idx];
+        if (item.id == null) {
+          failCount++;
+          continue;
+        }
+
+        // Extract filename without extension
+        String filenameWithoutExt = item.id!;
+        final lastDot = item.id!.lastIndexOf('.');
+        if (lastDot > 0) {
+          filenameWithoutExt = item.id!.substring(0, lastDot);
+        }
+
+        try {
+          // Download file from server: /download/{foldername}/{filename}
+          final downloadUrl = '$baseUrl/download/${Uri.encodeComponent(deviceName)}/${Uri.encodeComponent(filenameWithoutExt)}';
+          print('${timestamp()} Downloading from: $downloadUrl');
+
+          final response = await http.get(Uri.parse(downloadUrl)).timeout(const Duration(minutes: 5));
+
+          if (response.statusCode == 200) {
+            final bytes = response.bodyBytes;
+            
+            // Get file type and extension from Content-Type header
+            final contentType = response.headers['content-type'] ?? '';
+            final isVideo = contentType.startsWith('video/');
+            final extension = _getExtensionFromContentType(contentType);
+            
+            // Get temp directory and save file
+            final tempDir = await getTemporaryDirectory();
+            final tempFile = File('${tempDir.path}/$filenameWithoutExt.$extension');
+            await tempFile.writeAsBytes(bytes);
+
+            // Save to photo library
+            if (isVideo) {
+              await PhotoManager.editor.saveVideo(tempFile, title: filenameWithoutExt);
+            } else {
+              await PhotoManager.editor.saveImageWithPath(tempFile.path, title: filenameWithoutExt);
+            }
+
+            // Clean up temp file
+            try {
+              await tempFile.delete();
+            } catch (_) {}
+
+            successCount++;
+            // Add to local cache so green checkmark appears
+            _mediaCache.addFilename(filenameWithoutExt);
+            print('${timestamp()} Downloaded and saved: $filenameWithoutExt');
+          } else {
+            failCount++;
+            print('${timestamp()} Download failed with status ${response.statusCode}: $filenameWithoutExt');
+          }
+        } catch (e) {
+          failCount++;
+          print('${timestamp()} Error downloading $filenameWithoutExt: $e');
+        }
+
+        // Update progress
+        if (mounted) {
+          setState(() {});
+        }
+      }
+    } catch (e) {
+      print('${timestamp()} Error in download process: $e');
+      _showMessage('Error downloading files: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _selectedIndexes.clear();
+        });
+      }
+    }
+
+    // Show result message
+    if (successCount > 0 || failCount > 0) {
+      String message = 'Downloaded $successCount of $totalCount files';
+      if (failCount > 0) {
+        message += ' ($failCount failed)';
+      }
+      _showMessage(message);
+    }
+  }
+
+  /// Get file extension from Content-Type header (e.g., "image/jpeg" -> "jpg", "video/mp4" -> "mp4")
+  String _getExtensionFromContentType(String contentType) {
+    // Parse mime type (e.g., "image/jpeg; charset=utf-8" -> "image/jpeg")
+    final mimeType = contentType.split(';').first.trim().toLowerCase();
+    
+    // Map common mime types to extensions
+    const mimeToExt = {
+      // Images
+      'image/jpeg': 'jpg',
+      'image/jpg': 'jpg',
+      'image/png': 'png',
+      'image/heic': 'heic',
+      'image/heif': 'heif',
+      'image/gif': 'gif',
+      'image/webp': 'webp',
+      'image/tiff': 'tiff',
+      'image/bmp': 'bmp',
+      // Videos
+      'video/mp4': 'mp4',
+      'video/quicktime': 'mov',
+      'video/x-msvideo': 'avi',
+      'video/x-ms-wmv': 'wmv',
+      'video/webm': 'webm',
+      'video/3gpp': '3gp',
+      'video/x-matroska': 'mkv',
+      'video/mpeg': 'mpg',
+    };
+    
+    if (mimeToExt.containsKey(mimeType)) {
+      return mimeToExt[mimeType]!;
+    }
+    
+    // Fallback: try to extract from mime type (e.g., "video/mp4" -> "mp4")
+    final parts = mimeType.split('/');
+    if (parts.length == 2) {
+      final subtype = parts[1];
+      // Handle special cases
+      if (subtype == 'quicktime') return 'mov';
+      if (subtype == 'jpeg') return 'jpg';
+      return subtype;
+    }
+    
+    // Default fallback
+    return mimeType.startsWith('video') ? 'mp4' : 'jpg';
   }
 }
 
