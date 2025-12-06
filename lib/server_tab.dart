@@ -6,7 +6,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:photo_sync/device_finder.dart';
 import 'package:photo_sync/http_sync_client.dart' as http_api;
-import 'package:photo_sync/local_media_cache.dart';
 import 'package:photo_sync/utils.dart';
 
 class ServerTab extends StatefulWidget {
@@ -22,10 +21,9 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver, Auto
   int _currentPage = 0;
   static const int _itemsPerPage = 12;
   List<ServerMediaItem> _mediaItems = [];
-  Set<int> _selectedIndexes = {}; // Indexes of selected items
+  Set<String> _selectedIds = {}; // IDs of selected items (not indexes)
   bool _loading = false;
   int _totalMediaCount = 0;
-  final LocalMediaCache _mediaCache = LocalMediaCache(); // Singleton cache instance
 
   @override
   bool get wantKeepAlive => true;
@@ -176,33 +174,6 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver, Auto
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message), duration: const Duration(seconds: 2)));
   }
 
-  /// Load local media filenames in background using cache
-  void _loadLocalMediaFilenames() {
-    // Load asynchronously without blocking UI
-    _mediaCache
-        .getLocalMediaFilenames()
-        .then((_) {
-          if (mounted) {
-            setState(() {}); // Trigger rebuild to show green checkmarks
-          }
-        })
-        .catchError((e) {
-          print('${timestamp()} Error loading local media filenames: $e');
-        });
-  }
-
-  /// Check if a server file exists in local library by comparing filenames without extensions
-  bool _isMediaInLocalLibrary(String serverFileId) {
-    // Extract filename without extension from server file ID
-    String filenameWithoutExt = serverFileId;
-    final lastDot = serverFileId.lastIndexOf('.');
-    if (lastDot > 0) {
-      filenameWithoutExt = serverFileId.substring(0, lastDot);
-    }
-
-    return _mediaCache.contains(filenameWithoutExt);
-  }
-
   Widget _buildMediaWidget(ServerMediaItem item) {
     // If we have thumbData (base64), decode and display it
     if (item.thumbData != null && item.thumbData!.isNotEmpty) {
@@ -236,19 +207,13 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver, Auto
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _loadLocalMediaFilenames(); // Load local media filenames in background
     _refreshGallery();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // When app resumes, refresh local media cache and reload current page
+    // When app resumes, reload current page
     if (state == AppLifecycleState.resumed) {
-      // Reload local media cache since user may have deleted photos in another app
-      _mediaCache.reload().then((_) {
-        if (mounted) setState(() {});
-      });
-      
       // Delay slightly to let UI settle
       Future.microtask(() {
         if (mounted) {
@@ -270,10 +235,6 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver, Auto
     // If the selected server changed, refresh but preserve page if same server
     if (oldWidget.selectedServer?.deviceName != widget.selectedServer?.deviceName || oldWidget.selectedServer?.ipAddress != widget.selectedServer?.ipAddress) {
       // Server actually changed, reset to page 0 and refresh
-      // Also reload local media cache for the new server context
-      _mediaCache.reload().then((_) {
-        if (mounted) setState(() {});
-      });
       _currentPage = 0;
       _refreshGallery();
     }
@@ -303,7 +264,7 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver, Auto
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    if (_selectedIndexes.isNotEmpty)
+                    if (_selectedIds.isNotEmpty)
                       ElevatedButton.icon(
                         onPressed: _loading ? null : _downloadSelected,
                         icon: const Icon(Icons.download, size: 16),
@@ -315,7 +276,7 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver, Auto
                           foregroundColor: Colors.white,
                         ),
                       ),
-                    if (_selectedIndexes.isNotEmpty) const SizedBox(width: 6),
+                    if (_selectedIds.isNotEmpty) const SizedBox(width: 6),
                     ElevatedButton.icon(
                       onPressed: _loading ? null : _refreshGallery,
                       icon: const Icon(Icons.refresh, size: 16),
@@ -379,17 +340,16 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver, Auto
                     itemCount: _mediaItems.length,
                     itemBuilder: (context, idx) {
                       final item = _mediaItems[idx];
-                      final isInLibrary = item.id != null && _isMediaInLocalLibrary(item.id!);
-                      final isSelected = _selectedIndexes.contains(idx);
+                      final isSelected = item.id != null && _selectedIds.contains(item.id);
                       return GestureDetector(
                         onTap:
-                            (!isInLibrary && !_loading)
+                            (item.id != null && !_loading)
                                 ? () {
                                   setState(() {
                                     if (isSelected) {
-                                      _selectedIndexes.remove(idx);
+                                      _selectedIds.remove(item.id);
                                     } else {
-                                      _selectedIndexes.add(idx);
+                                      _selectedIds.add(item.id!);
                                     }
                                   });
                                 }
@@ -412,17 +372,6 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver, Auto
                                       Text('VIDEO', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
                                     ],
                                   ),
-                                ),
-                              ),
-                            // Green checkmark for media that exists in local library
-                            if (isInLibrary)
-                              Positioned(
-                                top: 4,
-                                right: 4,
-                                child: Container(
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(color: Colors.green, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
-                                  child: const Icon(Icons.check, color: Colors.white, size: 16),
                                 ),
                               ),
                             // Selection overlay for selected items
@@ -464,7 +413,7 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver, Auto
 
   // Download selected items from server
   Future<void> _downloadSelected() async {
-    if (_selectedIndexes.isEmpty || _loading) return;
+    if (_selectedIds.isEmpty || _loading) return;
 
     final server = widget.selectedServer;
     if (server == null || server.ipAddress == null) {
@@ -478,27 +427,19 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver, Auto
 
     int successCount = 0;
     int failCount = 0;
-    final totalCount = _selectedIndexes.length;
+    final totalCount = _selectedIds.length;
 
     try {
       // Get device name (folder name on server)
       final deviceName = await DeviceManager.getLocalDeviceName();
       final baseUrl = 'http://${server.ipAddress}:8080';
 
-      for (final idx in _selectedIndexes.toList()) {
-        if (idx >= _mediaItems.length) continue;
-
-        final item = _mediaItems[idx];
-        if (item.id == null) {
-          failCount++;
-          continue;
-        }
-
+      for (final itemId in _selectedIds.toList()) {
         // Extract filename without extension
-        String filenameWithoutExt = item.id!;
-        final lastDot = item.id!.lastIndexOf('.');
+        String filenameWithoutExt = itemId;
+        final lastDot = itemId.lastIndexOf('.');
         if (lastDot > 0) {
-          filenameWithoutExt = item.id!.substring(0, lastDot);
+          filenameWithoutExt = itemId.substring(0, lastDot);
         }
 
         try {
@@ -534,8 +475,6 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver, Auto
             } catch (_) {}
 
             successCount++;
-            // Add to local cache so green checkmark appears
-            _mediaCache.addFilename(filenameWithoutExt);
             print('${timestamp()} Downloaded and saved: $filenameWithoutExt');
           } else {
             failCount++;
@@ -558,7 +497,7 @@ class _ServerTabState extends State<ServerTab> with WidgetsBindingObserver, Auto
       if (mounted) {
         setState(() {
           _loading = false;
-          _selectedIndexes.clear();
+          _selectedIds.clear();
         });
       }
     }

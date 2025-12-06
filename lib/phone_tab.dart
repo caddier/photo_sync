@@ -133,7 +133,11 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
       if (!mounted) return;
       setState(() {
         _allPhotos = photos;
-        _currentPhotoPage = 0;
+        // Preserve current page, but ensure it's valid for the new photo count
+        final maxPage = (photos.length / _itemsPerPage).ceil() - 1;
+        if (_currentPhotoPage > maxPage) {
+          _currentPhotoPage = maxPage < 0 ? 0 : maxPage;
+        }
         _updateDisplayedPhotos();
         _loadingPhotos = false;
       });
@@ -168,7 +172,11 @@ class _PhoneTabState extends State<PhoneTab> with SingleTickerProviderStateMixin
       if (!mounted) return;
       setState(() {
         _allVideos = videos;
-        _currentVideoPage = 0;
+        // Preserve current page, but ensure it's valid for the new video count
+        final maxPage = (videos.length / _itemsPerPage).ceil() - 1;
+        if (_currentVideoPage > maxPage) {
+          _currentVideoPage = maxPage < 0 ? 0 : maxPage;
+        }
         _updateDisplayedVideos();
         _loadingVideos = false;
       });
